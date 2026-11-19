@@ -24,6 +24,8 @@ interface FormProviderProps {
   recordLabel?: string;
   baseline?: unknown;
   tenantId?: string | null;
+  // This is supplied only for externally provisioned accounts so child field rows can apply selective locks.
+  isExternalAccount?: boolean;
   children: ReactNode;
 }
 
@@ -35,6 +37,7 @@ export function FormProvider({
   recordLabel = '',
   baseline = null,
   tenantId = null,
+  isExternalAccount = false,
   children,
 }: FormProviderProps) {
   const isCommunity = useIsCommunity();
@@ -49,6 +52,7 @@ export function FormProvider({
     recordLabel,
     baseline,
     tenantId,
+    isExternalAccount,
   };
   const scope: FieldScope = { path: [], readOnly };
   return (

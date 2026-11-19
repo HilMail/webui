@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FieldRow } from '@/components/forms/FieldRow';
 import { VariantSelect } from '@/components/forms/VariantSelect';
+import { InheritedPermissionsInfo, InheritedRoleInfo } from '@/components/forms/InheritedRoleInfo';
 import { EnclosingSchemaContext, PanelContext, useFormContext, useInPanel } from '@/components/forms/formContext';
 import { buildEmbeddedDefaults } from '@/lib/schemaResolver';
 import { embeddedEntries, isRecord, resolveEmbedded, switchVariantValues } from '@/lib/embeddedSchema';
@@ -56,6 +57,14 @@ export function EmbeddedObjectEditor({
   };
   const entries = embeddedEntries(resolved).filter(({ field }) => field.update !== 'serverSet');
 
+  // Normalize extension object names so inherited-role guidance works for both core and x:-prefixed schemas.
+  const normalizedObjectName = objectName.replace(/^x:/, '');
+  const isInheritedRole =
+    (normalizedObjectName === 'UserRoles' && resolved.variant?.name !== 'Custom') ||
+    (normalizedObjectName === 'Roles' && resolved.variant?.name === 'Default');
+  const isInheritedPermissions = normalizedObjectName === 'Permissions' && resolved.variant?.name === 'Inherit';
+  const hasInheritanceInfo = isInheritedRole || isInheritedPermissions;
+
   if (!resolved.variants && entries.length === 0) return null;
 
   const frame = bare ? 'bare' : inPanel ? 'rule' : 'panel';
@@ -70,7 +79,12 @@ export function EmbeddedObjectEditor({
         )}
       >
         {resolved.variants && (
-          <div className={cn(frame === 'panel' ? 'py-3' : 'py-2', entries.length > 0 && 'border-b border-border')}>
+          <div
+            className={cn(
+              frame === 'panel' ? 'py-3' : 'py-2',
+              (entries.length > 0 || hasInheritanceInfo) && 'border-b border-border',
+            )}
+          >
             <VariantSelect
               labelledBy={control?.['aria-labelledby']}
               ariaLabel={control?.['aria-label']}
@@ -81,6 +95,10 @@ export function EmbeddedObjectEditor({
             />
           </div>
         )}
+        {isInheritedRole && (
+          <InheritedRoleInfo objectName={objectName} variant={resolved.variant?.name ?? ''} frame={frame} />
+        )}
+        {isInheritedPermissions && <InheritedPermissionsInfo frame={frame} />}
         {entries.length > 0 && (
           <div className={cn('divide-y divide-border', frame === 'rule' && '[&>[data-slot=field-row]]:py-3')}>
             <EnclosingSchemaContext value={resolved.schemaName}>

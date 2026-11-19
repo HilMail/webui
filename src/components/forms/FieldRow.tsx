@@ -23,6 +23,16 @@ import type { Field, FormField } from '@/types/schema';
 
 const ARIA_REQUIRED_TYPES = new Set(['string', 'number', 'enum', 'blobId']);
 
+// External directories remain authoritative for identity and credential data; Stalwart-local access settings stay editable.
+const EXTERNAL_DIRECTORY_MANAGED_FIELDS = new Set([
+  'name',
+  'domainId',
+  'emailAddress',
+  'credentials',
+  'aliases',
+  'secrets',
+]);
+
 export interface FieldRowProps {
   field: Field;
   formField: FormField;
@@ -86,11 +96,15 @@ export function FieldRow({ field, formField, value, onChange, error, readOnly: f
   const referencesLocked =
     ft.type === 'objectId' && ctx.isCommunity && !!resolveObject(ctx.schema, ft.objectName)?.enterprise;
   const locked = isEnterpriseLockedIn(ctx, field.enterprise);
+  // Restrict only top-level directory-owned fields, avoiding accidental locks in unrelated embedded objects.
+  const isExternalDirectoryManagedField =
+    ctx.isExternalAccount && topLevel && EXTERNAL_DIRECTORY_MANAGED_FIELDS.has(formField.name);
   const readOnly =
     scope.readOnly ||
     forceReadOnly ||
     locked ||
     referencesLocked ||
+    isExternalDirectoryManagedField ||
     field.update === 'serverSet' ||
     (topLevel && ctx.mode === 'edit' && field.update === 'immutable');
   const { traits, RowAddon } = resolveWidget(ft);

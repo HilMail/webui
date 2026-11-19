@@ -12,6 +12,7 @@ import { Loader2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { EnterpriseUpsell } from '@/components/common/EnterpriseUpsell';
+import { useJmapList } from '@/data/objects';
 import { useIsCommunity, usePermissionCheckers } from '@/hooks/usePermissions';
 import { useResolvedView } from '@/hooks/useResolvedView';
 import { layoutViewFor } from '@/lib/layout';
@@ -91,17 +92,33 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
   const section = viewToSection[viewName];
 
   const isObject = obj.objectType.type === 'object';
-  const canCreate = isObject && checkers.hasObjectPermission(obj.permissionPrefix, 'Create');
-  const massActions = resolveMassActions(
+  // Directory-backed accounts must be provisioned and deleted in their source directory, not in WebAdmin.
+  const isAccountUser = viewName === 'x:Account/User';
+  const { data: directoryList } = useJmapList('x:Directory', { limit: 1 }, { enabled: isAccountUser });
+  const hasExternalDirectory = isAccountUser && (directoryList?.ids.length ?? 0) > 0;
+  const canCreate =
+    isObject &&
+    (!isAccountUser || !hasExternalDirectory) &&
+    checkers.hasObjectPermission(obj.permissionPrefix, 'Create');
+  const availableMassActions = resolveMassActions(
     list.massActions,
     { isObject, permissionPrefix: obj.permissionPrefix },
     checkers,
     t('list.delete', 'Delete'),
   );
-  const itemActions = resolveItemActions(schema, list.itemActions, obj.permissionPrefix, {
+  // Retain non-destructive actions while removing only deletions that would desynchronize the external authority.
+  const massActions =
+    isAccountUser && hasExternalDirectory
+      ? availableMassActions.filter(({ action }) => action.type !== 'delete')
+      : availableMassActions;
+  const availableItemActions = resolveItemActions(schema, list.itemActions, obj.permissionPrefix, {
     hasObjectPermission: checkers.hasObjectPermission,
     isCommunity,
   });
+  const itemActions =
+    isAccountUser && hasExternalDirectory
+      ? availableItemActions.filter((action) => !(action.kind === 'mutation' && action.action.type === 'delete'))
+      : availableItemActions;
   const visibleFilters = (list.filters ?? []).filter(
     (f) => f.type !== 'objectId' || canAccessView(schema, f.objectName, 'Get', checkers),
   );
@@ -203,12 +220,19 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
           <h1 className="page-title">{list.title}</h1>
           {list.subtitle && <p className="mt-1 text-sm text-muted-foreground">{list.subtitle}</p>}
         </div>
-        {canCreate && section && (
-          <Button onClick={() => navigate(`/${section}/${viewName}/new`)}>
-            <Plus aria-hidden />
-            {t('list.create', 'Create {{name}}', { name: list.singularName })}
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          {isAccountUser && hasExternalDirectory && (
+            <span className="inline-flex items-center rounded-md border border-border bg-muted/60 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs">
+              {t('list.managedByExternalDirectory', 'Managed by external directory')}
+            </span>
+          )}
+          {canCreate && section && (
+            <Button onClick={() => navigate(`/${section}/${viewName}/new`)}>
+              <Plus aria-hidden />
+              {t('list.create', 'Create {{name}}', { name: list.singularName })}
+            </Button>
+          )}
+        </div>
       </div>
 
       {listState.error && <ListError message={listState.error} onRetry={listState.refetch} />}

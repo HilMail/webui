@@ -132,9 +132,9 @@ jobs:
 
   rolling:
     name: Update rolling major release
-    needs: [build, publish]
-    # Rolling major tags are version-release aliases and must never treat a main branch name as a release tag.
-    if: startsWith(github.ref, 'refs/tags/v') && needs.build.outputs.prerelease == 'false'
+    needs: [build]
+    # The rolling major release is the stable main-channel download, not a version-tag alias.
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     concurrency:
       group: rolling-v${{ needs.build.outputs.major }}
@@ -144,12 +144,20 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      TAG: ${{ github.ref_name }}
       ROLLING_TAG: v${{ needs.build.outputs.major }}
       ASSET: webui.zip
     steps:
-      - name: Download versioned asset
-        run: gh release download "$TAG" --pattern "$ASSET"
+      - uses: actions/checkout@v6
+        with:
+          # Keep the rolling tag attached to the exact main revision whose artifact passed validation.
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+
+      - name: Download build artifact
+        # Reuse the verified artifact from the build job instead of rebuilding or requiring a versioned release.
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-zip
 
       - name: Move rolling tag
         run: |

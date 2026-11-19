@@ -19,6 +19,8 @@ export interface FormContextValue {
   recordLabel: string;
   baseline: unknown;
   tenantId: string | null;
+  // Lets field renderers protect identity data owned by an external directory while preserving local settings edits.
+  isExternalAccount: boolean;
 }
 
 export interface FieldScope {

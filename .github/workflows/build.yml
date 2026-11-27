@@ -59,6 +59,8 @@ jobs:
 
       - run: npx eslint src/
 
+      - run: npm test
+
       - run: npm run build
 
       - name: Create webui.zip

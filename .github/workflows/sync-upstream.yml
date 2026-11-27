@@ -76,10 +76,11 @@ jobs:
       - name: Validate rebased fork
         if: steps.rebase.outputs.changed == 'true'
         run: |
-          # Validate the combined code before publishing any rewritten history.
+          # Validate types, lint, unit/component tests, and production bundle before publishing rewritten history.
           npm ci
           npm run typecheck
           npx eslint src/
+          npm test
           npm run build
 
       - name: Publish rebased main
@@ -114,7 +115,7 @@ jobs:
             {
               printf 'Automatic rebase of the fork main branch onto stalwartlabs/webui:main failed.\n\n'
               printf '[Inspect the failed workflow run](%s).\n\n' "$RUN_URL"
-              printf 'Check the logs for a missing or expired SYNC_FORK_TOKEN, rebase conflicts, failed validation, or a concurrent push.\n\n'
+              printf 'Check the logs for a missing or expired SYNC_FORK_TOKEN, rebase conflicts, failed typecheck/lint/test checks, or a concurrent push.\n\n'
               printf 'The sync job never pushes before validation passes. Resolve the cause and rerun **Sync upstream**. This issue closes automatically after a successful sync check.\n'
             } > "$body_file"
             if [ -n "$issue_number" ]; then

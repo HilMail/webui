@@ -28,6 +28,13 @@ export const PAGES: readonly PageOverride[] = [
     ),
   },
   {
+    match: { customComponent: 'CommunityHealth' },
+    component: lazyPage(
+      () => import('@/features/diagnostics/CommunityHealthPage'),
+      (m) => m.CommunityHealthPage,
+    ),
+  },
+  {
     match: { customComponent: 'LiveDelivery' },
     component: lazyPage(
       () => import('@/features/troubleshoot/DeliveryTracePage'),

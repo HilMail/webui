@@ -7,6 +7,7 @@
 import { createElement } from 'react';
 import {
   Circle,
+  HeartPulseIcon,
   KeyIcon,
   LockKeyholeIcon,
   MailsIcon,
@@ -19,8 +20,9 @@ import { ICONS } from '@/components/common/icons.generated';
 
 const warned = new Set<string>();
 
-// Keep icons needed by client-only Overview cards/nav out of generated schema icon manifests.
+// Keep icons needed by client-only Overview/Diagnostics pages out of generated schema icon manifests.
 const EXTRA_ICONS: Readonly<Record<string, LucideIcon>> = {
+  'heart-pulse': HeartPulseIcon,
   'panels-top-left': PanelsTopLeftIcon,
   'users-round': UsersRoundIcon,
   shield: ShieldIcon,

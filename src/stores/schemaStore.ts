@@ -5,37 +5,74 @@
  */
 
 import { create } from 'zustand';
+import { COMMUNITY_HEALTH_VIEW_NAME } from '@/features/diagnostics/constants';
 import { OVERVIEW_VIEW_NAME } from '@/features/overview/constants';
 import { isLinkEnterprise, layoutViewFor } from '@/lib/layout';
 import { resolveObject, resolveSchema } from '@/lib/schemaResolver';
 import type { Field, LayoutItem, LayoutSubItem, Schema } from '@/types/schema';
 
-const OVERVIEW_KEYWORDS = ['overview', 'queue', 'dkim', 'certificates', 'reports', 'inventory', 'home'];
+const CLIENT_PAGE_KEYWORDS: Record<string, string[]> = {
+  [OVERVIEW_VIEW_NAME]: ['overview', 'queue', 'dkim', 'certificates', 'reports', 'inventory', 'home'],
+  [COMMUNITY_HEALTH_VIEW_NAME]: ['health', 'healthz', 'ready', 'prometheus', 'metrics', 'discover', 'autoconfig', 'imap', 'smtp', 'oidc'],
+};
 
-/**
- * Injects the client-only Overview page into the primary sidebar layout right below
- * Dashboard (or first when absent) because backend schemas cannot declare it directly.
- */
-function withOverviewNavEntry(schema: Schema): Schema {
-  const first = schema.layouts[0];
-  if (!first) return schema;
-
-  const alreadyPresent = first.items.some((item) => 'link' in item && item.link.viewName === OVERVIEW_VIEW_NAME);
-  if (alreadyPresent) return schema;
-
-  const overviewLink: LayoutItem = {
-    link: { name: 'Overview', icon: 'panels-top-left', viewName: OVERVIEW_VIEW_NAME },
-  };
-  const dashboardIdx = first.items.findIndex(
-    (item) => 'link' in item && item.link.viewName === 'CustomComponent/Dashboard',
+function layoutHasView(schema: Schema, viewName: string): boolean {
+  const inSub = (items: LayoutSubItem[]): boolean =>
+    items.some((item) => (item.type === 'link' ? item.viewName === viewName : inSub(item.items)));
+  return schema.layouts.some((layout) =>
+    layout.items.some((item) => ('link' in item ? item.link.viewName === viewName : inSub(item.container.items))),
   );
-  const insertAt = dashboardIdx !== -1 ? dashboardIdx + 1 : 0;
-  const items = [...first.items.slice(0, insertAt), overviewLink, ...first.items.slice(insertAt)];
+}
 
+function insertLayoutLink(
+  schema: Schema,
+  targetLayoutIdx: number,
+  link: LayoutItem,
+  afterViewName?: string,
+): Schema {
+  const layout = schema.layouts[targetLayoutIdx];
+  if (!layout) return schema;
+  const anchorIdx = afterViewName
+    ? layout.items.findIndex((item) => 'link' in item && item.link.viewName === afterViewName)
+    : -1;
+  const insertAt = anchorIdx !== -1 ? anchorIdx + 1 : 0;
+  const items = [...layout.items.slice(0, insertAt), link, ...layout.items.slice(insertAt)];
   return {
     ...schema,
-    layouts: [{ ...first, items }, ...schema.layouts.slice(1)],
+    layouts: schema.layouts.map((l, idx) => (idx === targetLayoutIdx ? { ...l, items } : l)),
   };
+}
+
+/**
+ * Injects client-only pages (Overview and Community System Health) into sidebar layouts
+ * because backend schemas do not declare frontend diagnostic views directly.
+ */
+function withClientNavEntries(rawSchema: Schema): Schema {
+  if (rawSchema.layouts.length === 0) return rawSchema;
+  let schema = rawSchema;
+
+  if (!layoutHasView(schema, OVERVIEW_VIEW_NAME)) {
+    schema = insertLayoutLink(
+      schema,
+      0,
+      { link: { name: 'Overview', icon: 'panels-top-left', viewName: OVERVIEW_VIEW_NAME } },
+      'CustomComponent/Dashboard',
+    );
+  }
+
+  if (!layoutHasView(schema, COMMUNITY_HEALTH_VIEW_NAME)) {
+    const troubleshootIdx = schema.layouts.findIndex((l) => /troubleshoot/i.test(l.name));
+    const targetIdx = troubleshootIdx !== -1 ? troubleshootIdx : 0;
+    const afterView = troubleshootIdx !== -1 ? 'CustomComponent/LiveDelivery' : OVERVIEW_VIEW_NAME;
+    schema = insertLayoutLink(
+      schema,
+      targetIdx,
+      { link: { name: 'System Health', icon: 'heart-pulse', viewName: COMMUNITY_HEALTH_VIEW_NAME } },
+      afterView,
+    );
+  }
+
+  return schema;
 }
 
 export interface SearchIndexEntry {
@@ -91,7 +128,7 @@ function walkLayouts(schema: Schema): { viewToSection: Record<string, string>; l
         if (!(item.link.viewName in viewToSection)) {
           viewToSection[item.link.viewName] = sectionName;
         }
-        const keywords = item.link.viewName === OVERVIEW_VIEW_NAME ? OVERVIEW_KEYWORDS : undefined;
+        const keywords = CLIENT_PAGE_KEYWORDS[item.link.viewName];
         linkEntries.push({
           text: item.link.name,
           type: 'link',
@@ -252,7 +289,7 @@ export const useSchemaStore = create<SchemaState>()((set) => ({
   searchIndex: [],
 
   setSchema: (rawSchema) => {
-    const schema = withOverviewNavEntry(rawSchema);
+    const schema = withClientNavEntries(rawSchema);
     const { viewToSection, linkEntries } = walkLayouts(schema);
     const searchIndex = buildSearchIndex(schema, viewToSection, linkEntries);
     set({

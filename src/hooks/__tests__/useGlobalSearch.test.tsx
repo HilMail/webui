@@ -134,6 +134,11 @@ describe('useGlobalSearch Enterprise filtering', () => {
       result.current.setQuery('Overview');
     });
     expect(result.current.results.map((r) => r.viewName)).toContain('CustomComponent/Overview');
+
+    act(() => {
+      result.current.setQuery('prometheus');
+    });
+    expect(result.current.results.map((r) => r.viewName)).toContain('CustomComponent/CommunityHealth');
   });
 
   it('includes permitted Enterprise pages, sections, and fields on Enterprise edition', () => {

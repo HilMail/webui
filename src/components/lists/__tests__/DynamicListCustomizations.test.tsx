@@ -5,11 +5,12 @@
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DynamicList } from '@/components/lists/DynamicList';
+import * as csvExport from '@/lib/csvExport';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { withAccountListColumns } from '@/lib/accountColumns';
 import { useAccountStore } from '@/stores/accountStore';
@@ -352,5 +353,26 @@ describe('DynamicList fork customizations', () => {
     renderList('x:Account/User');
     fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
     expect(screen.getByText('Tenant')).toBeInTheDocument();
+  });
+
+  it('exports the currently loaded list rows as spreadsheet-safe CSV with synthetic columns', async () => {
+    const downloadSpy = vi.spyOn(csvExport, 'downloadCsv').mockImplementation(() => {});
+    mockRows = [
+      { id: 'u1', name: 'alice', usedDiskQuota: 1024, quotas: { maxDiskQuota: 2048 }, aliases: { a1: { name: 'sales' } } },
+    ];
+
+    renderList('x:Account/User');
+    const exportButton = screen.getByRole('button', { name: 'Export CSV' });
+    expect(exportButton).toBeEnabled();
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(downloadSpy).toHaveBeenCalledTimes(1);
+    });
+    const [filename, csv] = downloadSpy.mock.calls[0];
+    expect(filename).toMatch(/^account-user-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(csv).toContain('"Username","Usage / Quota","Aliases"');
+    expect(csv).toContain('"alice","1 KB / 2 KB","1"');
+    downloadSpy.mockRestore();
   });
 });

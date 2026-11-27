@@ -30,6 +30,7 @@ import type { ResolvedView } from '@/lib/schemaResolver';
 
 import { QUOTA_STATE_FILTER_KEY, QUOTA_STATES, type QuotaStateFilter } from './clientList';
 import { FilterBar } from './FilterBar';
+import { ExportCsvButton } from './ExportCsvButton';
 import { ListTable } from './ListTable';
 import { ListError, ListMessage, ListSpinner } from './ListStates';
 import { LogListTools } from './LogListTools';
@@ -292,6 +293,11 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
 
   const isQueuedMessage = objectName === 'x:QueuedMessage';
   const showRowActionsColumn = itemActions.length > 0 || isQueuedMessage;
+  const loadedRows = listState.allRows ?? items;
+  const exportFileBase = viewName
+    .replace(/^x:/, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .toLowerCase();
 
   return (
     <div className="space-y-3.5">
@@ -300,12 +306,21 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
           <h1 className="page-title">{list.title}</h1>
           {list.subtitle && <p className="mt-1 text-sm text-muted-foreground">{list.subtitle}</p>}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {isAccountUser && hasExternalDirectory && (
             <span className="inline-flex items-center rounded-md border border-border bg-muted/60 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs">
               {t('list.managedByExternalDirectory', 'Managed by external directory')}
             </span>
           )}
+          <ExportCsvButton
+            schema={schema}
+            objectName={objectName}
+            fileBase={exportFileBase}
+            columns={list.columns}
+            fields={fields}
+            rows={loadedRows}
+            disabled={listState.isLoading}
+          />
           {canCreate && section && (
             <Button onClick={() => navigate(`/${section}/${viewName}/new`)}>
               <Plus aria-hidden />

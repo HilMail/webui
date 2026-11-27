@@ -21,6 +21,13 @@ const ALL_MODES: readonly PageMode[] = ['list', 'create', 'edit', 'detail', 'sin
 
 export const PAGES: readonly PageOverride[] = [
   {
+    match: { customComponent: 'Overview' },
+    component: lazyPage(
+      () => import('@/features/overview/OverviewPage'),
+      (m) => m.OverviewPage,
+    ),
+  },
+  {
     match: { customComponent: 'LiveDelivery' },
     component: lazyPage(
       () => import('@/features/troubleshoot/DeliveryTracePage'),

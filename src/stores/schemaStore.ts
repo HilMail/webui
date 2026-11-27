@@ -5,9 +5,38 @@
  */
 
 import { create } from 'zustand';
+import { OVERVIEW_VIEW_NAME } from '@/features/overview/constants';
 import { isLinkEnterprise, layoutViewFor } from '@/lib/layout';
 import { resolveObject, resolveSchema } from '@/lib/schemaResolver';
-import type { Field, Schema, LayoutSubItem } from '@/types/schema';
+import type { Field, LayoutItem, LayoutSubItem, Schema } from '@/types/schema';
+
+const OVERVIEW_KEYWORDS = ['overview', 'queue', 'dkim', 'certificates', 'reports', 'inventory', 'home'];
+
+/**
+ * Injects the client-only Overview page into the primary sidebar layout right below
+ * Dashboard (or first when absent) because backend schemas cannot declare it directly.
+ */
+function withOverviewNavEntry(schema: Schema): Schema {
+  const first = schema.layouts[0];
+  if (!first) return schema;
+
+  const alreadyPresent = first.items.some((item) => 'link' in item && item.link.viewName === OVERVIEW_VIEW_NAME);
+  if (alreadyPresent) return schema;
+
+  const overviewLink: LayoutItem = {
+    link: { name: 'Overview', icon: 'panels-top-left', viewName: OVERVIEW_VIEW_NAME },
+  };
+  const dashboardIdx = first.items.findIndex(
+    (item) => 'link' in item && item.link.viewName === 'CustomComponent/Dashboard',
+  );
+  const insertAt = dashboardIdx !== -1 ? dashboardIdx + 1 : 0;
+  const items = [...first.items.slice(0, insertAt), overviewLink, ...first.items.slice(insertAt)];
+
+  return {
+    ...schema,
+    layouts: [{ ...first, items }, ...schema.layouts.slice(1)],
+  };
+}
 
 export interface SearchIndexEntry {
   text: string;
@@ -62,6 +91,7 @@ function walkLayouts(schema: Schema): { viewToSection: Record<string, string>; l
         if (!(item.link.viewName in viewToSection)) {
           viewToSection[item.link.viewName] = sectionName;
         }
+        const keywords = item.link.viewName === OVERVIEW_VIEW_NAME ? OVERVIEW_KEYWORDS : undefined;
         linkEntries.push({
           text: item.link.name,
           type: 'link',
@@ -69,6 +99,7 @@ function walkLayouts(schema: Schema): { viewToSection: Record<string, string>; l
           section: sectionName,
           breadcrumb: `${sectionName} > ${item.link.name}`,
           icon: item.link.icon,
+          ...(keywords ? { keywords } : {}),
           ...(isLinkEnterprise(schema, item.link.viewName) ? { enterprise: true } : {}),
         });
       } else if ('container' in item) {
@@ -220,7 +251,8 @@ export const useSchemaStore = create<SchemaState>()((set) => ({
   viewToSection: {},
   searchIndex: [],
 
-  setSchema: (schema) => {
+  setSchema: (rawSchema) => {
+    const schema = withOverviewNavEntry(rawSchema);
     const { viewToSection, linkEntries } = walkLayouts(schema);
     const searchIndex = buildSearchIndex(schema, viewToSection, linkEntries);
     set({

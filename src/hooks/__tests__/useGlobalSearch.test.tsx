@@ -124,11 +124,16 @@ describe('useGlobalSearch Enterprise filtering', () => {
     });
     expect(result.current.results).toEqual([]);
 
-    // Regular pages and non-Enterprise fields remain searchable on Community.
+    // Regular pages, client-only Overview, and non-Enterprise fields remain searchable on Community.
     act(() => {
       result.current.setQuery('Username');
     });
     expect(result.current.results.map((r) => r.text)).toContain('Username');
+
+    act(() => {
+      result.current.setQuery('Overview');
+    });
+    expect(result.current.results.map((r) => r.viewName)).toContain('CustomComponent/Overview');
   });
 
   it('includes permitted Enterprise pages, sections, and fields on Enterprise edition', () => {

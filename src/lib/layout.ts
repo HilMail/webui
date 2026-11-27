@@ -128,3 +128,26 @@ export function findFirstAccessibleLinkInLayout(
 export function visibleLayouts(schema: Schema, canGet: CanGet, hasPerm?: HasPermission): Layout[] {
   return schema.layouts.filter((layout) => findFirstVisibleLinkInLayout(schema, layout, canGet, hasPerm) !== null);
 }
+
+/**
+ * Prefer Overview as the landing page when the Enterprise Dashboard is unavailable
+ * (e.g. Community edition or missing liveMetrics), falling back to the first accessible link.
+ */
+export function findPreferredDefaultLinkInLayout(
+  schema: Schema,
+  layout: Layout,
+  edition: string,
+  canGet: CanGet,
+  hasPerm?: HasPermission,
+  overviewViewName = 'CustomComponent/Overview',
+): string | null {
+  const dashboardAccessible = isLinkAccessible(schema, 'CustomComponent/Dashboard', edition, canGet, hasPerm);
+  if (
+    !dashboardAccessible &&
+    layoutContainsLink(layout, overviewViewName) &&
+    isLinkAccessible(schema, overviewViewName, edition, canGet, hasPerm)
+  ) {
+    return overviewViewName;
+  }
+  return findFirstAccessibleLinkInLayout(schema, layout, edition, canGet, hasPerm);
+}

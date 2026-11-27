@@ -5,10 +5,29 @@
  */
 
 import { createElement } from 'react';
-import { Circle, type LucideIcon } from 'lucide-react';
+import {
+  Circle,
+  KeyIcon,
+  LockKeyholeIcon,
+  MailsIcon,
+  PanelsTopLeftIcon,
+  ShieldIcon,
+  UsersRoundIcon,
+  type LucideIcon,
+} from 'lucide-react';
 import { ICONS } from '@/components/common/icons.generated';
 
 const warned = new Set<string>();
+
+// Keep icons needed by client-only Overview cards/nav out of generated schema icon manifests.
+const EXTRA_ICONS: Readonly<Record<string, LucideIcon>> = {
+  'panels-top-left': PanelsTopLeftIcon,
+  'users-round': UsersRoundIcon,
+  shield: ShieldIcon,
+  mails: MailsIcon,
+  key: KeyIcon,
+  'file-lock': LockKeyholeIcon,
+};
 
 function iconKey(name: string): string {
   const trimmed = name.trim();
@@ -24,7 +43,7 @@ interface DynamicIconProps {
 
 export function DynamicIcon({ name, className, fallback = Circle }: DynamicIconProps) {
   const key = iconKey(name);
-  const icon = Object.hasOwn(ICONS, key) ? ICONS[key] : undefined;
+  const icon = Object.hasOwn(ICONS, key) ? ICONS[key] : Object.hasOwn(EXTRA_ICONS, key) ? EXTRA_ICONS[key] : undefined;
   if (!icon && import.meta.env.DEV && !warned.has(key)) {
     warned.add(key);
     console.warn(`Unknown icon name "${name}": run npm run generate:icons after schema changes`);

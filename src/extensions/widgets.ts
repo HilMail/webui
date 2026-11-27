@@ -9,6 +9,7 @@ import {
   ColorWidget,
   MultilineWidget,
   SecretWidget,
+  SieveValue,
   SieveWidget,
   TextWidget,
 } from '@/components/forms/widgets/StringWidgets';
@@ -100,6 +101,7 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     match: { stringFormat: ['sieve'] },
     traits: BLOCK_TEXT,
     Edit: SieveWidget,
+    View: SieveValue,
     RowAddon: SievepadRowAddon,
   }),
   widget({ key: 'string:color', match: { stringFormat: ['color'] }, traits: SIDE, Edit: ColorWidget }),

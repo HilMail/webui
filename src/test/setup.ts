@@ -24,6 +24,21 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
   });
 }
 
+// Provide minimal Range layout shims in jsdom so CodeMirror 6 can mount and measure text lines cleanly.
+if (typeof Range !== 'undefined') {
+  if (!Range.prototype.getClientRects) {
+    Range.prototype.getClientRects = () =>
+      ({
+        length: 0,
+        item: () => null,
+        [Symbol.iterator]: function* () {},
+      }) as DOMRectList;
+  }
+  if (!Range.prototype.getBoundingClientRect) {
+    Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+  }
+}
+
 // Ensure each test starts with an unmounted DOM tree when explicit globals are disabled.
 afterEach(() => {
   cleanup();

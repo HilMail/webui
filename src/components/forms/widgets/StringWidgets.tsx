@@ -15,6 +15,7 @@ import { SECRET_MASK } from '@/lib/jmapUtils';
 import { cn } from '@/lib/utils';
 import { BufferedInput, BufferedTextarea } from '@/components/forms/widgets/BufferedInputs';
 import { formatPlaceholder, inputTypeFor } from '@/components/forms/widgets/placeholders';
+import { LazySieveEditor } from '@/components/forms/widgets/LazyWidgets';
 import type { WidgetProps } from '@/components/forms/widgets/types';
 import type { FieldTypeString } from '@/types/schema';
 
@@ -76,21 +77,25 @@ export function MultilineWidget(props: WidgetProps<FieldTypeString>) {
 }
 
 export function SieveWidget(props: WidgetProps<FieldTypeString>) {
-  const { type, formField, value, readOnly, control } = props;
+  const { formField, value, readOnly, control } = props;
   return (
-    <BufferedTextarea
+    <LazySieveEditor
       {...control}
       value={stringValue(value)}
       onCommit={stringCommitter(props)}
       disabled={readOnly}
       placeholder={formField.placeholder}
-      minLength={type.minLength}
-      maxLength={type.maxLength}
-      rows={16}
-      spellCheck={false}
-      className="font-mono text-xs"
     />
   );
+}
+
+/** Read-only Sieve viewer so non-editable MTA policy scripts render with syntax highlighting and search in full form views. */
+export function SieveValue({ value, variant = 'full' }: { value: unknown; variant?: 'full' | 'compact' }) {
+  const text = stringValue(value);
+  if (variant === 'compact') {
+    return <span className="line-clamp-2 font-mono text-xs">{text}</span>;
+  }
+  return <LazySieveEditor value={text} readOnly />;
 }
 
 export function ColorWidget(props: WidgetProps<FieldTypeString>) {

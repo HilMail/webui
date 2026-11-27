@@ -5,6 +5,7 @@
  */
 
 import { lazy, Suspense } from 'react';
+import type { SieveEditorProps } from '@/components/forms/widgets/SieveEditor';
 import type { WidgetProps } from '@/components/forms/widgets/types';
 import type { FieldTypeObject } from '@/types/schema';
 
@@ -17,6 +18,25 @@ const PasskeyRegistrationField = lazy(() =>
     default: m.PasskeyRegistrationField,
   })),
 );
+
+// Split CodeMirror 6 into its own async chunk so non-Sieve forms do not download it eagerly.
+const SieveEditorLazy = lazy(() =>
+  import('@/components/forms/widgets/SieveEditor').then((m) => ({ default: m.SieveEditor })),
+);
+
+export function LazySieveEditor(props: SieveEditorProps) {
+  return (
+    <Suspense
+      fallback={
+        <pre className="min-h-[16rem] rounded-xl border border-border bg-muted p-3 font-mono text-xs text-foreground">
+          {props.value}
+        </pre>
+      }
+    >
+      <SieveEditorLazy {...props} />
+    </Suspense>
+  );
+}
 
 export function OtpAuthWidget(props: WidgetProps<FieldTypeObject>) {
   return (

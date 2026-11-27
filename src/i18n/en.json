@@ -246,7 +246,13 @@
     "entriesOverLimit": "Not added, the limit is {{max}}: {{list}}",
     "entriesSample_one": "{{list}} and {{count}} more",
     "entriesSample_other": "{{list}} and {{count}} more",
-    "midnight": "midnight"
+    "midnight": "midnight",
+    "sieveBadge": "SIEVE",
+    "lineCount_one": "{{count}} line",
+    "lineCount_other": "{{count}} lines",
+    "readOnly": "Read-only",
+    "wordWrap": "Wrap",
+    "sieveSourceCopy": "Sieve script"
   },
   "filters": {
     "after": "After",

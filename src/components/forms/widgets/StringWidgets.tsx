@@ -14,10 +14,20 @@ import { Button } from '@/components/ui/button';
 import { SECRET_MASK } from '@/lib/jmapUtils';
 import { cn } from '@/lib/utils';
 import { BufferedInput, BufferedTextarea } from '@/components/forms/widgets/BufferedInputs';
+import { useFieldScope, useFormContext } from '@/components/forms/formContext';
 import { formatPlaceholder, inputTypeFor } from '@/components/forms/widgets/placeholders';
 import { LazySieveEditor } from '@/components/forms/widgets/LazyWidgets';
 import type { WidgetProps } from '@/components/forms/widgets/types';
 import type { FieldTypeString } from '@/types/schema';
+
+function readBaselineString(baseline: unknown, path: readonly string[]): string | undefined {
+  let current: unknown = baseline;
+  for (const segment of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return typeof current === 'string' ? current : undefined;
+}
 
 function stringCommitter({ type, onChange }: WidgetProps<FieldTypeString>) {
   return (v: string) => onChange(type.nullable && v === '' ? null : v);
@@ -78,10 +88,14 @@ export function MultilineWidget(props: WidgetProps<FieldTypeString>) {
 
 export function SieveWidget(props: WidgetProps<FieldTypeString>) {
   const { formField, value, readOnly, control } = props;
+  const { baseline } = useFormContext();
+  const { path } = useFieldScope();
+  const baselineValue = readBaselineString(baseline, [...path, formField.name]);
   return (
     <LazySieveEditor
       {...control}
       value={stringValue(value)}
+      baselineValue={baselineValue}
       onCommit={stringCommitter(props)}
       disabled={readOnly}
       placeholder={formField.placeholder}

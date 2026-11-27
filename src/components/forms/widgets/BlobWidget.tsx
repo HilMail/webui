@@ -19,7 +19,7 @@ import type { FieldTypeBlobId } from '@/types/schema';
 
 export function BlobWidget({ type, value, onChange, readOnly, control }: WidgetProps<FieldTypeBlobId>) {
   const { t } = useTranslation();
-  const { recordLabel } = useFormContext();
+  const { recordLabel, baseline } = useFormContext();
   const [edited, setEdited] = useState<string | null>(null);
   if (edited !== null && value !== edited) {
     setEdited(null);
@@ -27,6 +27,20 @@ export function BlobWidget({ type, value, onChange, readOnly, control }: WidgetP
   const isOwnEdit = edited !== null && value === edited;
   const blobId = !isOwnEdit && typeof value === 'string' && value.length > 0 ? value : null;
   const blob = useBlobText(blobId);
+
+  // Retain the initially fetched blob text across local edits so Sieve diff view still compares against the saved server script.
+  const [savedTextState, setSavedTextState] = useState<{ baseline: unknown; text: string | undefined }>({
+    baseline,
+    text: undefined,
+  });
+  if (savedTextState.baseline !== baseline) {
+    setSavedTextState({
+      baseline,
+      text: typeof blob.data === 'string' ? blob.data : undefined,
+    });
+  } else if (typeof blob.data === 'string' && savedTextState.text !== blob.data) {
+    setSavedTextState({ baseline, text: blob.data });
+  }
 
   if (blobId && blob.isPending) {
     return (
@@ -67,6 +81,7 @@ export function BlobWidget({ type, value, onChange, readOnly, control }: WidgetP
         <LazySieveEditor
           {...control}
           value={text}
+          baselineValue={savedTextState.text}
           onCommit={(next) => {
             setEdited(next);
             onChange(next);

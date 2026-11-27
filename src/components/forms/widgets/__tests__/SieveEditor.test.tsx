@@ -98,4 +98,72 @@ describe('SieveEditor and Sieve field widgets', () => {
       expect(editors.some((text) => text.includes('# hilmail-data-guard'))).toBe(true);
     });
   });
+
+  it('supports dry-read lock, unified diff preview, snippet copying, and live syntax check status bar', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    const baseline = 'require ["log"];\nif size :over 5M {\n  keep;\n}';
+    const modified = 'require ["log"];\nif size :over 10M {\n  reject "too big";';
+
+    const { rerender } = render(<SieveEditor value={baseline} baselineValue={baseline} />);
+
+    // Clean baseline starts editable, reports Syntax OK, matches saved state, and hides Diff until edited.
+    expect(screen.getByText('Syntax OK')).toBeInTheDocument();
+    expect(screen.getByText('Matches saved')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Diff/i })).not.toBeInTheDocument();
+    expect(document.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('true');
+
+    // Dry-read lock puts CodeMirror in read-only mode so inspecting rules cannot accidentally edit them.
+    const dryReadButton = screen.getByRole('button', { name: 'Dry-read' });
+    fireEvent.click(dryReadButton);
+    expect(dryReadButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Dry-read lock')).toBeInTheDocument();
+    expect(document.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('false');
+
+    // Snippets menu copies a policy snippet without mutating the active buffer.
+    fireEvent.click(screen.getByRole('button', { name: 'Snippets' }));
+    fireEvent.click(screen.getByRole('button', { name: /Sender domain guard/i }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('if envelope :domain :is "from" "example.com" {\n  keep;\n}');
+    });
+
+    // Updating the draft against baseline reveals Diff (+2/-3) and reports unclosed brace errors in the status bar.
+    rerender(<SieveEditor value={modified} baselineValue={baseline} />);
+    expect(screen.getByText('Unclosed "{" on line 2 (missing "}")')).toBeInTheDocument();
+    expect(screen.getByText('Modified (+2 / -3)')).toBeInTheDocument();
+
+    const diffButton = screen.getByRole('button', { name: /Diff \(\+2\/-3\)/i });
+    fireEvent.click(diffButton);
+    const diffRegion = screen.getByRole('region', { name: 'Sieve policy diff' });
+    expect(diffRegion).toHaveTextContent('if size :over 5M {');
+    expect(diffRegion).toHaveTextContent('if size :over 10M {');
+    expect(diffRegion).toHaveTextContent('reject "too big";');
+  });
+
+  it('wires FormProvider baseline into SieveWidget for pre-save diff tracking', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <FormProvider schema={MINIMAL_SCHEMA} baseline={{ script: 'keep;' }}>
+          <SieveWidget
+            type={{ type: 'string', format: 'sieve' }}
+            field={{ description: '', type: { type: 'string', format: 'sieve' }, update: 'mutable' }}
+            formField={{ name: 'script', label: 'Script' }}
+            value={'reject "blocked";'}
+            onChange={vi.fn()}
+            readOnly={false}
+            control={{ id: 'sieve-baseline-field' }}
+          />
+        </FormProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Diff \(\+1\/-1\)/i })).toBeInTheDocument();
+    });
+  });
 });

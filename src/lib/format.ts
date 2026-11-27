@@ -147,7 +147,8 @@ export type DateTimeStyle = 'short' | 'medium';
 export function formatDateTime(value: DateInput, timeStyle: DateTimeStyle = 'short'): string {
   const d = toDate(value);
   if (!d) return String(value);
-  return dateFormat({ dateStyle: 'medium', timeStyle }).format(d);
+  // Force 12-hour AM/PM clock across all browser/account locales instead of falling back to 24-hour regional defaults.
+  return dateFormat({ dateStyle: 'medium', timeStyle, hour12: true }).format(d);
 }
 
 export function formatDate(value: DateInput, options: Intl.DateTimeFormatOptions = { dateStyle: 'medium' }): string {
@@ -159,7 +160,7 @@ export function formatDate(value: DateInput, options: Intl.DateTimeFormatOptions
 export function formatTime(value: DateInput, options: { seconds?: boolean; milliseconds?: boolean } = {}): string {
   const d = toDate(value);
   if (!d) return String(value);
-  const opts: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
+  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
   if (options.seconds || options.milliseconds) opts.second = '2-digit';
   if (options.milliseconds) opts.fractionalSecondDigits = 3;
   return dateFormat(opts).format(d);
@@ -170,7 +171,7 @@ export function formatLocalTime(value: unknown): string {
   if (minutes === null) return String(value);
   if (minutes === MINUTES_PER_DAY) return i18n.t('field.endOfDay', 'End of day');
   const utc = Date.UTC(1970, 0, 1, Math.floor(minutes / MINUTES_PER_HOUR), minutes % MINUTES_PER_HOUR);
-  return dateFormat({ timeStyle: 'short', timeZone: 'UTC' }).format(utc);
+  return dateFormat({ timeStyle: 'short', timeZone: 'UTC', hour12: true }).format(utc);
 }
 
 export function formatIntervalEnd(value: unknown): string {
@@ -220,13 +221,13 @@ function dayPeriod(parts: Intl.DateTimeFormatPart[]): string | undefined {
 }
 
 export function localeClock(): LocaleClock {
-  const fmt = dateFormat({ hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
-  const { hourCycle } = fmt.resolvedOptions();
+  // Keep time pickers aligned with the 12-hour AM/PM display formatters.
+  const fmt = dateFormat({ hour: 'numeric', minute: '2-digit', timeZone: 'UTC', hour12: true });
   const morning = fmt.formatToParts(Date.UTC(1970, 0, 1, 1));
   const evening = fmt.formatToParts(Date.UTC(1970, 0, 1, 13));
   const periodIndex = morning.findIndex((part) => part.type === 'dayPeriod');
   return {
-    hour12: hourCycle === 'h11' || hourCycle === 'h12',
+    hour12: true,
     am: dayPeriod(morning) ?? 'AM',
     pm: dayPeriod(evening) ?? 'PM',
     meridiemFirst: periodIndex >= 0 && periodIndex < morning.findIndex((part) => part.type === 'hour'),

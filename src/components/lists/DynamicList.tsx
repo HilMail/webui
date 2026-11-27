@@ -19,7 +19,7 @@ import { layoutViewFor } from '@/lib/layout';
 import { canAccessView } from '@/lib/permissions';
 import { buildQueuedMessageJumps } from '@/lib/queueOpsLinks';
 import { isClientSortableColumn } from '@/lib/schemaDeviationTypes';
-import { getDisplayProperty } from '@/lib/schemaResolver';
+import { getDisplayProperty, resolveObject } from '@/lib/schemaResolver';
 import { QUOTA_USAGE_COLUMN } from '@/lib/syntheticColumns';
 import { cn } from '@/lib/utils';
 import { useAccountStore } from '@/stores/accountStore';
@@ -129,9 +129,14 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
     isAccountUser && hasExternalDirectory
       ? availableItemActions.filter((action) => !(action.kind === 'mutation' && action.action.type === 'delete'))
       : availableItemActions;
-  const visibleFilters = (list.filters ?? []).filter(
-    (f) => f.type !== 'objectId' || canAccessView(schema, f.objectName, 'Get', checkers),
-  );
+  const visibleFilters = (list.filters ?? []).filter((f) => {
+    // Enterprise-only fields and referenced Enterprise objects (such as x:Tenant) are paid features; hide them on Community builds.
+    if (isCommunity && fields[f.field]?.enterprise) return false;
+    if (f.type !== 'objectId') return true;
+    const target = resolveObject(schema, f.objectName);
+    if (isCommunity && target?.enterprise) return false;
+    return canAccessView(schema, f.objectName, 'Get', checkers);
+  });
 
   // Include client-sortable synthetic columns alongside server-declared sort fields.
   const sortableColumns = new Set([

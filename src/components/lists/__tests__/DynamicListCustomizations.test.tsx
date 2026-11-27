@@ -10,6 +10,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DynamicList } from '@/components/lists/DynamicList';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { withAccountListColumns } from '@/lib/accountColumns';
 import { useAccountStore } from '@/stores/accountStore';
 import { useSchemaStore } from '@/stores/schemaStore';
@@ -116,6 +117,8 @@ function makeTestSchema(): Schema {
     objects: {
       'x:Account': { type: 'object', description: 'Account', permissionPrefix: 'account' },
       'x:Account/User': { type: 'view', objectName: 'x:Account' },
+      'x:Domain': { type: 'object', description: 'Domain', permissionPrefix: 'domain' },
+      'x:Tenant': { type: 'object', description: 'Tenant', permissionPrefix: 'tenant', enterprise: true },
       'x:QueuedMessage': { type: 'object', description: 'Queued Message', permissionPrefix: 'queue' },
       'x:Log': { type: 'object', description: 'Log', permissionPrefix: 'log' },
     },
@@ -127,6 +130,17 @@ function makeTestSchema(): Schema {
       UserAccountFields: {
         properties: {
           name: { description: 'Username', type: { type: 'string', format: 'string' }, update: 'mutable' },
+          domainId: {
+            description: 'Domain',
+            type: { type: 'objectId', objectName: 'x:Domain' },
+            update: 'mutable',
+          },
+          memberTenantId: {
+            description: 'Tenant',
+            type: { type: 'objectId', objectName: 'x:Tenant' },
+            update: 'mutable',
+            enterprise: true,
+          },
         },
       },
       QueuedMessageFields: {
@@ -143,6 +157,11 @@ function makeTestSchema(): Schema {
         singularName: 'User',
         pluralName: 'Users',
         columns: [{ name: 'name', label: 'Username' }],
+        filters: [
+          { type: 'text', field: 'text', label: 'Text' },
+          { type: 'objectId', field: 'domainId', objectName: 'x:Domain', label: 'Domain' },
+          { type: 'objectId', field: 'memberTenantId', objectName: 'x:Tenant', label: 'Tenant' },
+        ],
         labelProperty: 'name',
         itemActions: [
           { type: 'setProperty', label: 'Disable', properties: { enable: false } },
@@ -186,7 +205,9 @@ function renderList(viewName: string) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <DynamicList viewName={viewName} />
+        <TooltipProvider>
+          <DynamicList viewName={viewName} />
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -209,6 +230,8 @@ describe('DynamicList fork customizations', () => {
           'accountCreate',
           'accountUpdate',
           'accountDestroy',
+          'domainGet',
+          'tenantGet',
           'queueGet',
           'queueQuery',
           'queueDestroy',
@@ -311,5 +334,23 @@ describe('DynamicList fork customizations', () => {
     fireEvent.keyDown(selector, { key: 'Enter' });
     fireEvent.click(screen.getByRole('option', { name: '50' }));
     expect(useUIStore.getState().listPageSize).toBe(50);
+  });
+
+  it('hides Enterprise-only filters such as Tenant on Community edition while showing them on Enterprise', () => {
+    mockRows = [{ id: 'u1', name: 'alice', usedDiskQuota: 0, quotas: {}, aliases: {} }];
+
+    const { unmount } = renderList('x:Account/User');
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.getByLabelText('Text')).toBeInTheDocument();
+    expect(screen.getByText('Domain')).toBeInTheDocument();
+    expect(screen.queryByText('Tenant')).not.toBeInTheDocument();
+    unmount();
+
+    useAccountStore
+      .getState()
+      .setAccountInfo(['accountGet', 'accountQuery', 'domainGet', 'tenantGet'], 'enterprise', 'en-US');
+    renderList('x:Account/User');
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.getByText('Tenant')).toBeInTheDocument();
   });
 });

@@ -4,8 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+import { resolveObject } from '@/lib/schemaResolver';
 import { getApiBaseUrl } from '@/services/api';
 import type { DiscoveryResponse } from '@/services/auth/oauth';
+import { jmapGetOne } from '@/services/jmap/client';
+import type { Schema } from '@/types/schema';
+
+export type PrometheusConfigInfo =
+  | { mode: 'disabled' }
+  | { mode: 'open' }
+  | { mode: 'basicAuth'; username: string }
+  | { mode: 'unknown' };
 
 export interface EndpointHealth {
   ok: boolean;
@@ -217,13 +226,64 @@ export function parsePrometheusMetrics(raw: string): PrometheusMetric[] {
   return metrics;
 }
 
-/** Fetches and parses Stalwart's Community-accessible `/metrics/prometheus` exposition endpoint. */
-export async function fetchPrometheusSnapshot(signal?: AbortSignal): Promise<PrometheusSnapshotResult> {
+function encodeBasicAuth(username: string, password: string): string {
+  const bytes = new TextEncoder().encode(`${username}:${password}`);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `Basic ${btoa(binary)}`;
+}
+
+/**
+ * Inspects Stalwart's `x:Metrics` singleton via JMAP so the UI knows whether `/metrics/prometheus`
+ * is disabled, anonymous, or Basic-Auth protected before making an HTTP request that triggers a browser auth modal.
+ */
+export async function fetchPrometheusConfig(
+  schema: Schema | null,
+  canGet: (prefix: string) => boolean,
+  signal?: AbortSignal,
+): Promise<PrometheusConfigInfo> {
+  if (!schema) return { mode: 'unknown' };
+  const resolved = resolveObject(schema, 'x:Metrics');
+  if (!resolved || !canGet(resolved.permissionPrefix)) return { mode: 'unknown' };
+
   try {
+    const record = await jmapGetOne(resolved.objectName, 'singleton', ['prometheus'], { signal });
+    const prom = record?.prometheus as Record<string, unknown> | undefined;
+    if (!prom || typeof prom !== 'object') return { mode: 'unknown' };
+    if (prom['@type'] === 'Disabled') return { mode: 'disabled' };
+    if (prom['@type'] === 'Enabled') {
+      const username = typeof prom.authUsername === 'string' ? prom.authUsername.trim() : '';
+      const hasSecret = prom.authSecret != null && prom.authSecret !== '';
+      if (username || hasSecret) {
+        return { mode: 'basicAuth', username };
+      }
+      return { mode: 'open' };
+    }
+    return { mode: 'unknown' };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    return { mode: 'unknown' };
+  }
+}
+
+export interface FetchPrometheusOptions {
+  signal?: AbortSignal;
+  credentials?: { username: string; password: string };
+}
+
+/** Fetches and parses Stalwart's Community-accessible `/metrics/prometheus` exposition endpoint. */
+export async function fetchPrometheusSnapshot(options: FetchPrometheusOptions = {}): Promise<PrometheusSnapshotResult> {
+  const { signal, credentials } = options;
+  try {
+    const headers: Record<string, string> = { Accept: 'text/plain; version=0.0.4, */*' };
+    if (credentials) {
+      headers.Authorization = encodeBasicAuth(credentials.username, credentials.password);
+    }
     const res = await fetch(`${getApiBaseUrl()}/metrics/prometheus`, {
       signal,
       cache: 'no-store',
-      headers: { Accept: 'text/plain; version=0.0.4, */*' },
+      credentials: 'omit',
+      headers,
     });
     if (res.status === 404) return { status: 'disabled' };
     if (res.status === 401 || res.status === 403) return { status: 'authRequired' };

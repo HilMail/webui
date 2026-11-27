@@ -9,10 +9,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchEmailDiscovery,
   fetchHealthStatus,
+  fetchPrometheusConfig,
   fetchPrometheusSnapshot,
   parseAutoconfigXml,
   parsePrometheusMetrics,
 } from '@/features/diagnostics/diagnosticsApi';
+import * as jmapClient from '@/services/jmap/client';
+import type { Schema } from '@/types/schema';
 
 describe('diagnosticsApi', () => {
   afterEach(() => {
@@ -138,10 +141,41 @@ describe('diagnosticsApi', () => {
     expect(await fetchPrometheusSnapshot()).toEqual({ status: 'authRequired' });
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(rawProm, { status: 200 }));
-    const ok = await fetchPrometheusSnapshot();
+    const ok = await fetchPrometheusSnapshot({ credentials: { username: 'prometheus', password: 'secret' } });
     expect(ok.status).toBe('ok');
     if (ok.status === 'ok') {
       expect(ok.metrics).toHaveLength(3);
     }
+  });
+
+  it('reads x:Metrics prometheus auth mode via JMAP before scraping', async () => {
+    const schema = {
+      objects: {
+        'x:Metrics': { type: 'singleton', description: 'Metrics', permissionPrefix: 'metrics' },
+      },
+      schemas: {},
+      fields: {},
+      forms: {},
+      lists: {},
+      enums: {},
+      dashboards: [],
+      layouts: [],
+    } as unknown as Schema;
+
+    vi.spyOn(jmapClient, 'jmapGetOne').mockResolvedValueOnce({
+      id: 'singleton',
+      prometheus: { '@type': 'Enabled', authUsername: 'prometheus', authSecret: '******' },
+    });
+    expect(await fetchPrometheusConfig(schema, () => true)).toEqual({
+      mode: 'basicAuth',
+      username: 'prometheus',
+    });
+
+    vi.spyOn(jmapClient, 'jmapGetOne').mockResolvedValueOnce({
+      id: 'singleton',
+      prometheus: { '@type': 'Disabled' },
+    });
+    expect(await fetchPrometheusConfig(schema, () => true)).toEqual({ mode: 'disabled' });
+    expect(await fetchPrometheusConfig(schema, () => false)).toEqual({ mode: 'unknown' });
   });
 });

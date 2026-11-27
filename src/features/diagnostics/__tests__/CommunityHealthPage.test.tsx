@@ -5,15 +5,50 @@
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CommunityHealthPage } from '@/features/diagnostics/CommunityHealthPage';
 import * as diagnosticsApi from '@/features/diagnostics/diagnosticsApi';
+import { useAccountStore } from '@/stores/accountStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useSchemaStore } from '@/stores/schemaStore';
+import type { Schema } from '@/types/schema';
+
+function createDiagnosticsSchema(): Schema {
+  return {
+    objects: {
+      'x:Metrics': { type: 'singleton', description: 'Metrics', permissionPrefix: 'metrics' },
+    },
+    schemas: {},
+    fields: {},
+    forms: {},
+    lists: {},
+    enums: {},
+    dashboards: [],
+    layouts: [
+      {
+        name: 'Settings',
+        icon: 'settings',
+        items: [{ link: { name: 'Metrics', icon: 'gauge', viewName: 'x:Metrics' } }],
+      },
+    ],
+  };
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <CommunityHealthPage />
+    </MemoryRouter>,
+  );
+}
 
 describe('CommunityHealthPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    useSchemaStore.getState().setSchema(createDiagnosticsSchema());
+    useAccountStore.getState().setAccountInfo(['metricsGet'], 'community', 'en-US');
     useAuthStore.setState({
       accounts: {
         a1: {
@@ -26,7 +61,7 @@ describe('CommunityHealthPage', () => {
     });
   });
 
-  it('renders health probes, autodiscover output, and filterable Prometheus metrics', async () => {
+  it('auto-loads Prometheus metrics when open and filters health/autodiscover cleanly', async () => {
     vi.spyOn(diagnosticsApi, 'fetchHealthStatus').mockResolvedValue({
       live: { ok: true, status: 200, elapsedMs: 4 },
       ready: { ok: false, status: 503, elapsedMs: 9 },
@@ -51,6 +86,7 @@ describe('CommunityHealthPage', () => {
       ],
       autoconfigAvailable: true,
     });
+    vi.spyOn(diagnosticsApi, 'fetchPrometheusConfig').mockResolvedValue({ mode: 'open' });
     vi.spyOn(diagnosticsApi, 'fetchPrometheusSnapshot').mockResolvedValue({
       status: 'ok',
       rawLines: 2,
@@ -60,7 +96,7 @@ describe('CommunityHealthPage', () => {
       ],
     });
 
-    render(<CommunityHealthPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Healthy')).toBeInTheDocument();
@@ -69,15 +105,12 @@ describe('CommunityHealthPage', () => {
 
     expect(screen.getByText('mail.hilmail.co:993')).toBeInTheDocument();
     expect(screen.getByText('https://mail.hilmail.co/auth/token')).toBeInTheDocument();
-
-    // Non-zero filter is enabled by default so idle zero counters are hidden until toggled off.
     expect(screen.getByText('smtp_connections_total')).toBeInTheDocument();
     expect(screen.queryByText('imap_connections_total')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Non-zero only' }));
     expect(screen.getByText('imap_connections_total')).toBeInTheDocument();
 
-    // Re-running discovery submits the updated account address cleanly.
     const emailInput = screen.getByLabelText('Account email for discovery');
     fireEvent.change(emailInput, { target: { value: 'bob@hilmail.co' } });
     fireEvent.click(screen.getByRole('button', { name: 'Check Discovery' }));
@@ -86,7 +119,7 @@ describe('CommunityHealthPage', () => {
     });
   });
 
-  it('shows setup guidance when /metrics/prometheus is disabled on the server', async () => {
+  it('skips auto-fetching /metrics/prometheus when Basic Auth is configured and loads on manual submit', async () => {
     vi.spyOn(diagnosticsApi, 'fetchHealthStatus').mockResolvedValue({
       live: { ok: true, status: 200, elapsedMs: 2 },
       ready: { ok: true, status: 200, elapsedMs: 3 },
@@ -101,12 +134,36 @@ describe('CommunityHealthPage', () => {
       mailServers: [],
       autoconfigAvailable: false,
     });
-    vi.spyOn(diagnosticsApi, 'fetchPrometheusSnapshot').mockResolvedValue({ status: 'disabled' });
+    vi.spyOn(diagnosticsApi, 'fetchPrometheusConfig').mockResolvedValue({
+      mode: 'basicAuth',
+      username: 'prometheus',
+    });
+    const promSpy = vi.spyOn(diagnosticsApi, 'fetchPrometheusSnapshot').mockResolvedValue({
+      status: 'ok',
+      rawLines: 1,
+      metrics: [{ name: 'queue_messages', type: 'gauge', help: 'Queued count', value: 5 }],
+    });
 
-    render(<CommunityHealthPage />);
+    renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText(/Prometheus metrics export is not enabled/i)).toBeInTheDocument();
+      expect(screen.getByLabelText('Prometheus username')).toHaveValue('prometheus');
+    });
+    // Must not auto-fetch on mount so the browser never pops up a native Basic Auth dialog.
+    expect(promSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Metrics settings' })).toHaveAttribute(
+      'href',
+      '/Settings/x:Metrics/singleton',
+    );
+
+    fireEvent.change(screen.getByLabelText('Prometheus password'), { target: { value: 'scrape-pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Load Metrics' }));
+
+    await waitFor(() => {
+      expect(promSpy).toHaveBeenCalledWith({
+        credentials: { username: 'prometheus', password: 'scrape-pass' },
+      });
+      expect(screen.getByText('queue_messages')).toBeInTheDocument();
     });
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -14,6 +15,7 @@ import {
   HeartPulse,
   Info,
   Loader2,
+  Lock,
   RefreshCw,
   Search,
   Server,
@@ -28,15 +30,20 @@ import { Input } from '@/components/ui/input';
 import {
   fetchEmailDiscovery,
   fetchHealthStatus,
+  fetchPrometheusConfig,
   fetchPrometheusSnapshot,
   type EmailDiscoveryResult,
   type EndpointHealth,
   type HealthSnapshot,
+  type PrometheusConfigInfo,
   type PrometheusSnapshotResult,
 } from '@/features/diagnostics/diagnosticsApi';
+import { usePermissionCheckers } from '@/hooks/usePermissions';
 import { formatNumber } from '@/lib/format';
+import { layoutViewFor } from '@/lib/layout';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/authStore';
+import { useSchemaStore } from '@/stores/schemaStore';
 
 function HealthProbeCard({
   title,
@@ -93,6 +100,9 @@ function HealthProbeCard({
  */
 export function CommunityHealthPage() {
   const { t } = useTranslation();
+  const schema = useSchemaStore((s) => s.schema);
+  const viewToSection = useSchemaStore((s) => s.viewToSection);
+  const { canGet } = usePermissionCheckers();
   const defaultAccountEmail = useAuthStore((s) => {
     const active = s.activeAccountId ? s.accounts[s.activeAccountId] : undefined;
     return active?.name ?? '';
@@ -105,14 +115,26 @@ export function CommunityHealthPage() {
   const [discovery, setDiscovery] = useState<EmailDiscoveryResult | null>(null);
   const [discoverManualLoading, setDiscoverManualLoading] = useState(false);
 
+  const [promConfig, setPromConfig] = useState<PrometheusConfigInfo | null>(null);
   const [prom, setProm] = useState<PrometheusSnapshotResult | null>(null);
   const [promManualLoading, setPromManualLoading] = useState(false);
   const [promQuery, setPromQuery] = useState('');
   const [hideZeroMetrics, setHideZeroMetrics] = useState(true);
+  const [promUsername, setPromUsername] = useState('');
+  const [promPassword, setPromPassword] = useState('');
+  const [promAuthFailed, setPromAuthFailed] = useState(false);
+
+  const metricsSettingsHref = useMemo(() => {
+    if (!schema) return null;
+    const viewName = layoutViewFor(schema, viewToSection, 'x:Metrics');
+    if (!viewName) return null;
+    const section = viewToSection[viewName];
+    return section ? `/${section}/${viewName}/singleton` : null;
+  }, [schema, viewToSection]);
 
   const healthLoading = health === null || healthManualLoading;
-  const promLoading = prom === null || promManualLoading;
   const discoverLoading = discoverManualLoading || (defaultAccountEmail.includes('@') && discovery === null);
+  const promLoading = promConfig === null || (promConfig.mode === 'open' && prom === null) || promManualLoading;
 
   const refreshHealth = useCallback(async () => {
     setHealthManualLoading(true);
@@ -127,12 +149,19 @@ export function CommunityHealthPage() {
   const refreshPrometheus = useCallback(async () => {
     setPromManualLoading(true);
     try {
-      const next = await fetchPrometheusSnapshot();
+      const creds =
+        promUsername.trim() && promPassword
+          ? { username: promUsername.trim(), password: promPassword }
+          : undefined;
+      if (promConfig?.mode === 'basicAuth' && !creds) {
+        return;
+      }
+      const next = await fetchPrometheusSnapshot({ credentials: creds });
       setProm(next);
     } finally {
       setPromManualLoading(false);
     }
-  }, []);
+  }, [promConfig, promUsername, promPassword]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,11 +173,25 @@ export function CommunityHealthPage() {
       })
       .catch(() => {});
 
-    void fetchPrometheusSnapshot(controller.signal)
-      .then((next) => {
-        if (!cancelled) setProm(next);
+    // Inspect x:Metrics config first so Basic-Auth endpoints never trigger an unexpected browser login popup on mount.
+    void fetchPrometheusConfig(schema, canGet, controller.signal)
+      .then((info) => {
+        if (cancelled) return;
+        setPromConfig(info);
+        if (info.mode === 'disabled') {
+          setProm({ status: 'disabled' });
+        } else if (info.mode === 'basicAuth') {
+          if (info.username) setPromUsername((prev) => prev || info.username);
+          setProm({ status: 'authRequired' });
+        } else if (info.mode === 'open') {
+          return fetchPrometheusSnapshot({ signal: controller.signal }).then((next) => {
+            if (!cancelled) setProm(next);
+          });
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setPromConfig({ mode: 'unknown' });
+      });
 
     if (defaultAccountEmail.includes('@')) {
       void fetchEmailDiscovery(defaultAccountEmail, controller.signal)
@@ -162,7 +205,7 @@ export function CommunityHealthPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [defaultAccountEmail]);
+  }, [schema, canGet, defaultAccountEmail]);
 
   const handleDiscoverSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -173,6 +216,23 @@ export function CommunityHealthPage() {
       setDiscovery(next);
     } finally {
       setDiscoverManualLoading(false);
+    }
+  };
+
+  const handlePrometheusAuthSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setPromManualLoading(true);
+    setPromAuthFailed(false);
+    try {
+      const creds =
+        promUsername.trim() && promPassword
+          ? { username: promUsername.trim(), password: promPassword }
+          : undefined;
+      const next = await fetchPrometheusSnapshot({ credentials: creds });
+      setProm(next);
+      setPromAuthFailed(next.status === 'authRequired');
+    } finally {
+      setPromManualLoading(false);
     }
   };
 
@@ -211,11 +271,11 @@ export function CommunityHealthPage() {
           size="sm"
           onClick={() => {
             void refreshHealth();
-            void refreshPrometheus();
+            if (prom?.status === 'ok') void refreshPrometheus();
           }}
-          disabled={healthLoading || promLoading}
+          disabled={healthLoading || promManualLoading}
         >
-          {healthLoading || promLoading ? (
+          {healthLoading || promManualLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
           ) : (
             <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -384,24 +444,82 @@ export function CommunityHealthPage() {
                 {t('diagnostics.loadingMetrics', 'Checking /metrics/prometheus...')}
               </div>
             ) : prom?.status === 'disabled' ? (
-              <div className="flex items-start gap-2.5 text-sm text-muted-foreground">
-                <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <p>
-                  {t(
-                    'diagnostics.promDisabled',
-                    'Prometheus metrics export is not enabled on this server (metrics.prometheus). Enable it in Stalwart config to inspect live SMTP, IMAP, JMAP, queue, and spam counters here.',
-                  )}
-                </p>
+              <div className="flex items-start justify-between gap-3 text-sm text-muted-foreground">
+                <div className="flex items-start gap-2.5">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <p>
+                    {t(
+                      'diagnostics.promDisabled',
+                      'Prometheus metrics export is not enabled on this server (metrics.prometheus). Enable it in Stalwart config to inspect live SMTP, IMAP, JMAP, queue, and spam counters here.',
+                    )}
+                  </p>
+                </div>
+                {metricsSettingsHref && (
+                  <Button asChild variant="outline" size="sm" className="shrink-0">
+                    <Link to={metricsSettingsHref}>{t('diagnostics.openMetricsSettings', 'Metrics settings')}</Link>
+                  </Button>
+                )}
               </div>
-            ) : prom?.status === 'authRequired' ? (
-              <div className="flex items-start gap-2.5 text-sm text-muted-foreground">
-                <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <p>
-                  {t(
-                    'diagnostics.promAuthRequired',
-                    '/metrics/prometheus is active but requires Basic Auth credentials matching your metrics.prometheus.auth configuration.',
+            ) : prom?.status === 'authRequired' || (!prom && promConfig?.mode === 'unknown') ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3 text-sm text-muted-foreground">
+                  <div className="flex items-start gap-2.5">
+                    <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <div className="space-y-1">
+                      <p>
+                        {promConfig?.mode === 'basicAuth'
+                          ? t(
+                              'diagnostics.promAuthRequired',
+                              '/metrics/prometheus requires Basic Auth (configured in Settings → Telemetry → Metrics, e.g. STALWART_METRICS_PASSWORD). Enter scrape credentials below to load metrics without triggering a browser popup.',
+                            )
+                          : t(
+                              'diagnostics.promManualCheck',
+                              'Prometheus endpoint may require Basic Auth. Enter scrape credentials if enabled, or click Load Metrics directly.',
+                            )}
+                      </p>
+                    </div>
+                  </div>
+                  {metricsSettingsHref && (
+                    <Button asChild variant="outline" size="sm" className="shrink-0">
+                      <Link to={metricsSettingsHref}>{t('diagnostics.openMetricsSettings', 'Metrics settings')}</Link>
+                    </Button>
                   )}
-                </p>
+                </div>
+                <form
+                  onSubmit={(e) => void handlePrometheusAuthSubmit(e)}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <Input
+                    value={promUsername}
+                    onChange={(e) => setPromUsername(e.target.value)}
+                    placeholder={t('diagnostics.promUsernamePlaceholder', 'Username (e.g. prometheus)')}
+                    aria-label={t('diagnostics.promUsernameLabel', 'Prometheus username')}
+                    className="w-48"
+                  />
+                  <Input
+                    type="password"
+                    value={promPassword}
+                    onChange={(e) => setPromPassword(e.target.value)}
+                    placeholder={t('diagnostics.promPasswordPlaceholder', 'Scrape password')}
+                    aria-label={t('diagnostics.promPasswordLabel', 'Prometheus password')}
+                    className="min-w-52 flex-1"
+                  />
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    disabled={
+                      promManualLoading || (promConfig?.mode === 'basicAuth' && (!promUsername.trim() || !promPassword))
+                    }
+                  >
+                    {promManualLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
+                    {t('diagnostics.loadMetrics', 'Load Metrics')}
+                  </Button>
+                </form>
+                {promAuthFailed && (
+                  <p className="text-xs text-destructive" role="alert">
+                    {t('diagnostics.promAuthFailed', 'Invalid Prometheus username or password.')}
+                  </p>
+                )}
               </div>
             ) : prom?.status === 'error' ? (
               <p className="text-sm text-destructive" role="alert">

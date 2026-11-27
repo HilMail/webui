@@ -5,6 +5,7 @@
  */
 
 import { buildJmapFilter } from '@/lib/listFilter';
+import { isClientOnlyFilterEnum } from '@/lib/logFilters';
 import type { ListPageParams } from '@/data/keys';
 import type { ResolvedSchema } from '@/lib/schemaResolver';
 import { isClientSortableColumn } from '@/lib/schemaDeviationTypes';
@@ -30,9 +31,11 @@ export function buildListFilter(
   list: Pick<List, 'filters' | 'filtersStatic'>,
   objectName: string,
 ): Record<string, unknown> | undefined {
+  // Exclude client-only filters (such as x:Log level/event) because Stalwart's server `/query` rejects them.
+  const serverFilters = list.filters?.filter((f) => !isClientOnlyFilterEnum(f));
   const filter = buildJmapFilter({
     appliedFilters: filters,
-    filters: list.filters,
+    filters: serverFilters,
     filtersStatic: list.filtersStatic,
     isXPrefixed: objectName.startsWith('x:'),
   });

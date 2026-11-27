@@ -23,7 +23,7 @@ interface ListCellProps {
 export function ListCell({ schema, objectName, column, field, value, item }: ListCellProps) {
   // Synthetic columns read multiple properties from the row rather than a single field value.
   if (hasSyntheticCell(column)) {
-    return <SyntheticCell column={column} item={item} />;
+    return <SyntheticCell column={column} item={item} schema={schema} />;
   }
   if (field) return <FieldValue schema={schema} type={field.type} value={value} variant="compact" />;
   if (column === '@type' && typeof value === 'string' && value) {

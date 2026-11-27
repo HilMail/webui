@@ -256,20 +256,40 @@ export async function jmapGetBatched(
     });
     items.push(...(result.list ?? []));
   }
-  return items;
+  // JMAP `/get` may return records in storage/map order instead of the `/query` order; preserve `ids` ordering so client-filtered lists stay newest-first.
+  const byId = new Map<string, JmapObject>();
+  for (const item of items) {
+    if (typeof item.id === 'string') byId.set(item.id, item);
+  }
+  if (byId.size !== items.length) return items;
+  return ids.flatMap((id) => {
+    const match = byId.get(id);
+    return match ? [match] : [];
+  });
+}
+
+export interface JmapQueryAllOptions extends JmapCallOptions {
+  /** Caps total IDs fetched so unbounded streams (like `x:Log`) don't pull all rotated history. */
+  maxIds?: number;
 }
 
 export async function jmapQueryAll(
   objectType: string,
   query: JmapQueryOptions = {},
-  options: JmapCallOptions = {},
+  options: JmapQueryAllOptions = {},
 ): Promise<string[]> {
   const accountId = options.accountId ?? getAccountId(objectType);
   const allIds: string[] = [];
+  const cap = options.maxIds;
   let anchor: string | undefined;
   for (let page = 0; page < MAX_QUERY_PAGES; page++) {
     options.signal?.throwIfAborted();
+    const remaining = cap !== undefined ? cap - allIds.length : undefined;
+    if (remaining !== undefined && remaining <= 0) break;
     const args: JmapQueryOptions = { ...query };
+    if (remaining !== undefined && (args.limit === undefined || args.limit > remaining)) {
+      args.limit = remaining;
+    }
     if (anchor) {
       delete args.position;
       args.anchor = anchor;
@@ -279,20 +299,21 @@ export async function jmapQueryAll(
     const pageIds = data.ids ?? [];
     if (pageIds.length === 0) break;
     allIds.push(...pageIds);
+    if (cap !== undefined && allIds.length >= cap) break;
     if (data.limit === undefined || data.limit === null) break;
     anchor = pageIds[pageIds.length - 1];
   }
-  return allIds;
+  return cap !== undefined && allIds.length > cap ? allIds.slice(0, cap) : allIds;
 }
 
 export async function jmapQueryAllAndGet(
   objectType: string,
   query: JmapQueryOptions = {},
   properties?: string[],
-  options: JmapCallOptions = {},
+  options: JmapQueryAllOptions = {},
 ): Promise<{ ids: string[]; list: JmapObject[] }> {
   const accountId = options.accountId ?? getAccountId(objectType);
-  const ids = await jmapQueryAll(objectType, query, { accountId, signal: options.signal });
+  const ids = await jmapQueryAll(objectType, query, { accountId, signal: options.signal, maxIds: options.maxIds });
   if (ids.length === 0) return { ids, list: [] };
   const list = await jmapGetBatched(objectType, ids, properties, { accountId, signal: options.signal });
   return { ids, list };

@@ -12,7 +12,7 @@ import { useJmapList } from '@/data/objects';
 import { errorMessage } from '@/lib/jmapErrors';
 import { JmapMethodError } from '@/services/errors';
 import type { List } from '@/types/schema';
-import { planClientMode, sortClientRows } from './clientList';
+import { planClientMode, processClientRows } from './clientList';
 import {
   LIST_PAGE_SIZE,
   buildListFilter,
@@ -64,18 +64,22 @@ export function useDynamicList(
   const effectiveList = list ?? EMPTY_LIST;
   const enabledObject = list && objectName ? objectName : null;
 
-  const plan = planClientMode(effectiveList, state);
+  const plan = planClientMode(effectiveList, objectName ?? '', state);
   const pageParams = buildListPageParams(state, effectiveList, objectName ?? '', LIST_PAGE_SIZE, labelProperty);
+  const allProperties =
+    plan.requiredProperties.length > 0 && pageParams.properties
+      ? [...new Set([...pageParams.properties, ...plan.requiredProperties])]
+      : pageParams.properties;
 
   const query = useJmapList(enabledObject, pageParams, { keepPrevious: true, enabled: !plan.client });
 
-  // When sorting by a synthetic column, pull all matching rows once and sort/slice locally.
+  // When client-only sorting or filtering is active, pull matching rows once and filter/sort/slice locally.
   const allQuery = useJmapListAll(plan.client ? enabledObject : null, {
     filter: pageParams.filter,
     sort: pageParams.sort,
-    properties: pageParams.properties,
+    properties: allProperties,
   });
-  const sortedRows = plan.client && allQuery.data ? sortClientRows(allQuery.data, plan.clientSort) : null;
+  const sortedRows = plan.client && allQuery.data ? processClientRows(allQuery.data, plan) : null;
 
   const anchorLost =
     !plan.client &&

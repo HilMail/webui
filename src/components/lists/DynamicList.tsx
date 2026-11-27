@@ -17,15 +17,21 @@ import { useIsCommunity, usePermissionCheckers } from '@/hooks/usePermissions';
 import { useResolvedView } from '@/hooks/useResolvedView';
 import { layoutViewFor } from '@/lib/layout';
 import { canAccessView } from '@/lib/permissions';
+import { buildQueuedMessageJumps } from '@/lib/queueOpsLinks';
 import { isClientSortableColumn } from '@/lib/schemaDeviationTypes';
 import { getDisplayProperty } from '@/lib/schemaResolver';
+import { QUOTA_USAGE_COLUMN } from '@/lib/syntheticColumns';
+import { cn } from '@/lib/utils';
+import { useAccountStore } from '@/stores/accountStore';
 import { useSchemaStore } from '@/stores/schemaStore';
 import type { List, Schema } from '@/types/schema';
 import type { ResolvedView } from '@/lib/schemaResolver';
 
+import { QUOTA_STATE_FILTER_KEY, QUOTA_STATES, type QuotaStateFilter } from './clientList';
 import { FilterBar } from './FilterBar';
 import { ListTable } from './ListTable';
 import { ListError, ListMessage, ListSpinner } from './ListStates';
+import { LogListTools } from './LogListTools';
 import { MassActionBar, type RunnableMassAction } from './MassActionBar';
 import { Pagination } from './Pagination';
 import { RowActions } from './RowActions';
@@ -74,6 +80,7 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
   const viewToSection = useSchemaStore((s) => s.viewToSection);
   const checkers = usePermissionCheckers();
   const isCommunity = useIsCommunity();
+  const edition = useAccountStore((s) => s.edition);
   const [upsellOpen, setUpsellOpen] = useState(false);
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
@@ -226,6 +233,59 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
   const sectionFor = (name: string) => viewToSection[name];
   const viewFor = (name: string) => layoutViewFor(schema, viewToSection, name, viewName);
 
+  const hasQuotaUsageColumn = list.columns.some((c) => c.name === QUOTA_USAGE_COLUMN);
+  const activeQuotaState = state.filters[QUOTA_STATE_FILTER_KEY];
+  const toggleQuotaState = (nextState: QuotaStateFilter) => {
+    const next = { ...state.filters };
+    if (activeQuotaState === nextState) delete next[QUOTA_STATE_FILTER_KEY];
+    else next[QUOTA_STATE_FILTER_KEY] = nextState;
+    listState.applyFilters(next);
+  };
+  const quotaChipLabels: Record<QuotaStateFilter, string> = {
+    near: t('list.quotaFilterNear', 'Near Quota (≥80%)'),
+    over: t('list.quotaFilterOver', 'Over Quota (≥100%)'),
+    negative: t('list.quotaFilterNegative', 'Negative Counter'),
+  };
+
+  // Surface domain-specific quick controls inline alongside the filter toggle pill.
+  const trailingTools =
+    hasQuotaUsageColumn || objectName === 'x:Log' ? (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {hasQuotaUsageColumn &&
+          QUOTA_STATES.map((qs) => {
+            const selected = activeQuotaState === qs;
+            return (
+              <button
+                key={qs}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => toggleQuotaState(qs)}
+                className={cn(
+                  'inline-flex h-8 items-center rounded-full px-3 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  selected
+                    ? 'bg-highlight text-highlight-foreground hover:bg-highlight-strong'
+                    : 'bg-muted text-muted-foreground hover:bg-muted-strong hover:text-foreground',
+                )}
+              >
+                {quotaChipLabels[qs]}
+              </button>
+            );
+          })}
+        {objectName === 'x:Log' && (
+          <LogListTools
+            filters={state.filters}
+            isFirstPage={state.anchors.length === 0}
+            isFetching={listState.isFetching}
+            onRefresh={listState.refetch}
+            onApplyFilters={listState.applyFilters}
+          />
+        )}
+      </div>
+    ) : undefined;
+
+  const isQueuedMessage = objectName === 'x:QueuedMessage';
+  const showRowActionsColumn = itemActions.length > 0 || isQueuedMessage;
+
   return (
     <div className="space-y-3.5">
       <div className="flex flex-wrap items-end justify-between gap-4 px-1 pb-1 pt-3">
@@ -252,7 +312,7 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
       {actions.error && <ListError message={actions.error} onDismiss={actions.clearError} />}
 
       <section className="tile relative overflow-hidden">
-        {visibleFilters.length > 0 && (
+        {visibleFilters.length > 0 ? (
           <FilterBar
             schema={schema}
             filters={visibleFilters}
@@ -261,7 +321,10 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
             disabled={listState.isFetching}
             onApply={listState.applyFilters}
             onReset={listState.resetFilters}
+            trailing={trailingTools}
           />
+        ) : (
+          trailingTools && <div className="flex flex-wrap items-center gap-2 p-2.5">{trailingTools}</div>
         )}
 
         {massActions.length > 0 && selection.pageState === 'all' && (
@@ -289,17 +352,28 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
           rowHref={(id) => (section ? `/${section}/${viewName}/${id}` : null)}
           rowLabel={(item) => itemLabel(item, labelProperty)}
           renderRowActions={
-            itemActions.length > 0
-              ? (_item, id, label) => (
-                  <RowActions
-                    actions={itemActions}
-                    label={label}
-                    hrefFor={(action) => itemActionHref(action, id, sectionFor, section, viewFor)}
-                    onMutation={(entry) => confirmItemAction(entry, id, label)}
-                    onLocked={() => setUpsellOpen(true)}
-                    disabled={actions.pending}
-                  />
-                )
+            showRowActionsColumn
+              ? (item, id, label) => {
+                  const extraLinks = isQueuedMessage
+                    ? buildQueuedMessageJumps(item, schema, viewToSection, edition, checkers, {
+                        traceTarget: (address) =>
+                          t('list.traceDeliveryFor', 'Trace delivery: {{address}}', { address }),
+                        logsFor: (address) => t('list.viewLogsFor', 'View logs: {{address}}', { address }),
+                      })
+                    : undefined;
+                  if (itemActions.length === 0 && (!extraLinks || extraLinks.length === 0)) return null;
+                  return (
+                    <RowActions
+                      actions={itemActions}
+                      label={label}
+                      hrefFor={(action) => itemActionHref(action, id, sectionFor, section, viewFor)}
+                      onMutation={(entry) => confirmItemAction(entry, id, label)}
+                      onLocked={() => setUpsellOpen(true)}
+                      extraLinks={extraLinks}
+                      disabled={actions.pending}
+                    />
+                  );
+                }
               : null
           }
           loading={listState.isLoading}

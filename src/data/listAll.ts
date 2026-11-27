@@ -21,24 +21,31 @@ export function fetchAllRowsQuery(objectName: string, params: ListPageParams) {
     queryKey: [...jmapKeys.lists(objectName), 'all', params] as const,
     staleTime: 0,
     queryFn: async ({ signal }: { signal: AbortSignal }): Promise<JmapObject[]> => {
-      const probe = evaluateFetchAllTotal(await probeQueryTotal(objectName, query, signal));
-      if (!probe.ok) {
-        throw new Error(
-          i18n.t(
-            'list.fetchAllHardCap',
-            'Refusing to load {{count}} matching rows into the browser (limit {{cap}}). Narrow filters to sort this column.',
-            { count: probe.total, cap: FETCH_ALL_HARD_CAP },
-          ),
-        );
+      // x:Log/query rejects non-zero positions and omits `total`; skip probing and cap newest entries instead.
+      const isLogStream = objectName === 'x:Log';
+      if (!isLogStream) {
+        const probe = evaluateFetchAllTotal(await probeQueryTotal(objectName, query, signal));
+        if (!probe.ok) {
+          throw new Error(
+            i18n.t(
+              'list.fetchAllHardCap',
+              'Refusing to load {{count}} matching rows into the browser (limit {{cap}}). Narrow filters to sort this column.',
+              { count: probe.total, cap: FETCH_ALL_HARD_CAP },
+            ),
+          );
+        }
+        if (probe.warn) {
+          toast({
+            title: i18n.t('list.fetchAllWarn', 'Loading {{count}} rows into the browser — this may be slow.', {
+              count: probe.total,
+            }),
+          });
+        }
       }
-      if (probe.warn) {
-        toast({
-          title: i18n.t('list.fetchAllWarn', 'Loading {{count}} rows into the browser — this may be slow.', {
-            count: probe.total,
-          }),
-        });
-      }
-      const { list } = await jmapQueryAllAndGet(objectName, query, properties, { signal });
+      const { list } = await jmapQueryAllAndGet(objectName, query, properties, {
+        signal,
+        maxIds: isLogStream ? 2000 : undefined,
+      });
       return list;
     },
   };

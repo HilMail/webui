@@ -18,6 +18,7 @@ import { TENANT_PROPERTY } from '@/lib/schemaResolver';
 import { CreatedValuesDialog } from '@/components/forms/CreatedValuesDialog';
 import { FormProvider } from '@/components/forms/FormProvider';
 import { FormSections } from '@/components/forms/FormSections';
+import { RawJsonDialog } from '@/components/forms/RawJsonDialog';
 import { UnsavedChangesDialog } from '@/components/forms/UnsavedChangesDialog';
 import { formFieldLabels } from '@/components/forms/formLogic';
 import { useDynamicForm, type DynamicFormModel, type DynamicFormOptions } from '@/components/forms/useDynamicForm';
@@ -158,10 +159,11 @@ export function DynamicForm({
   const title = useFormTitle(model);
   const sectionPrefix = useId();
   const wide = useSyncExternalStore(subscribeWide, isWide, () => false);
-  // Query external-directory presence only for account flows, so unrelated forms do not make extra JMAP requests.
+  // Query external-directory presence only for accounts and domains so unrelated forms do not make extra JMAP requests.
   const isAccountUser = viewName === 'x:Account/User';
   const isAccountPassword = viewName === 'x:AccountPassword';
-  const checksExternalDirectory = isAccountUser || isAccountPassword;
+  const isDomain = viewName === 'x:Domain';
+  const checksExternalDirectory = isAccountUser || isAccountPassword || isDomain;
   const { data: directoryList } = useJmapList('x:Directory', { limit: 1 }, { enabled: checksExternalDirectory });
   const hasExternalDirectory = checksExternalDirectory && (directoryList?.ids.length ?? 0) > 0;
 
@@ -191,6 +193,7 @@ export function DynamicForm({
         <h1 className="page-title break-words">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
       </div>
+      {!isCreate && !model.loadFailed && <RawJsonDialog title={title} original={state.original} draft={state.data} />}
     </div>
   );
 
@@ -297,12 +300,14 @@ export function DynamicForm({
         <div className="space-y-3.5">
           <FormProvider
             schema={schema}
+            viewName={viewName}
             mode={mode}
             readOnly={readOnly}
             recordLabel={model.recordLabel}
             baseline={state.original}
             tenantId={typeof tenantValue === 'string' ? tenantValue : null}
             isExternalAccount={isExternalAccount}
+            hasExternalDirectory={hasExternalDirectory}
           >
             <FormSections
               sections={model.sections}

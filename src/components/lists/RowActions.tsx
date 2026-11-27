@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import type { QueueRowJump } from '@/lib/queueOpsLinks';
 import type { ResolvedItemAction } from './listActions';
 
 type NavigateAction = Extract<ResolvedItemAction, { kind: 'navigate' }>;
@@ -27,10 +28,20 @@ interface RowActionsProps {
   hrefFor: (action: NavigateAction) => string | null;
   onMutation: (action: MutationAction) => void;
   onLocked: () => void;
+  // Optional contextual navigation shortcuts (e.g. Delivery Trace / Log Entries from queued messages).
+  extraLinks?: QueueRowJump[];
   disabled?: boolean;
 }
 
-export function RowActions({ actions, label, hrefFor, onMutation, onLocked, disabled = false }: RowActionsProps) {
+export function RowActions({
+  actions,
+  label,
+  hrefFor,
+  onMutation,
+  onLocked,
+  extraLinks,
+  disabled = false,
+}: RowActionsProps) {
   const { t } = useTranslation();
   return (
     <DropdownMenu>
@@ -81,6 +92,16 @@ export function RowActions({ actions, label, hrefFor, onMutation, onLocked, disa
             </DropdownMenuItem>
           );
         })}
+        {extraLinks && extraLinks.length > 0 && (
+          <>
+            {actions.length > 0 && <DropdownMenuSeparator />}
+            {extraLinks.map((link) => (
+              <DropdownMenuItem key={link.key} asChild>
+                <Link to={link.href}>{link.label}</Link>
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

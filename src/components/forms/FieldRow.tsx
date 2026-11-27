@@ -6,7 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Lock } from 'lucide-react';
+import { Info, Lock } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Markdown } from '@/components/common/Markdown';
 import { HelpTooltip } from '@/components/common/HelpTooltip';
@@ -16,6 +16,7 @@ import { FieldControl } from '@/components/forms/widgets/FieldControl';
 import { resolveWidget } from '@/extensions/widgets';
 import { fieldIds, isEnterpriseLockedIn, useFieldScope, useFormContext } from '@/components/forms/formContext';
 import { requiredMarker } from '@/components/forms/formLogic';
+import { getExternalPolicyFieldNotice } from '@/lib/externalPolicyNotices';
 import { resolveObject } from '@/lib/schemaResolver';
 import { cn } from '@/lib/utils';
 import type { ControlProps } from '@/components/forms/widgets/types';
@@ -86,6 +87,7 @@ export function FieldError({ id, error }: { id: string; error?: string }) {
 }
 
 export function FieldRow({ field, formField, value, onChange, error, readOnly: forceReadOnly = false }: FieldRowProps) {
+  const { t } = useTranslation();
   const ctx = useFormContext();
   const scope = useFieldScope();
   if (field.enterprise && ctx.hideEnterprise) return null;
@@ -93,6 +95,11 @@ export function FieldRow({ field, formField, value, onChange, error, readOnly: f
   const ft = field.type;
   const ids = fieldIds(ctx.idPrefix, [...scope.path, formField.name]);
   const topLevel = scope.path.length === 0;
+  // Warn admins when a field is owned or periodically overwritten by HilMail's external-directory sync loops.
+  const policyNotice =
+    topLevel && ctx.mode === 'edit'
+      ? getExternalPolicyFieldNotice(ctx.viewName, formField.name, ctx.hasExternalDirectory)
+      : null;
   const referencesLocked =
     ft.type === 'objectId' && ctx.isCommunity && !!resolveObject(ctx.schema, ft.objectName)?.enterprise;
   const locked = isEnterpriseLockedIn(ctx, field.enterprise);
@@ -171,6 +178,20 @@ export function FieldRow({ field, formField, value, onChange, error, readOnly: f
         )}
       </div>
       <div className={cn('min-w-0 space-y-1.5', layout === 'inline' && 'pt-0.5', asValue && '@xl:pt-2')}>
+        {policyNotice && (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
+            role="note"
+          >
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground/70" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">{t(policyNotice.titleKey, policyNotice.defaultTitle)}</p>
+              <p className="mt-0.5 leading-relaxed">
+                {t(policyNotice.descriptionKey, policyNotice.defaultDescription)}
+              </p>
+            </div>
+          </div>
+        )}
         <div className={cn(locked && 'opacity-60')}>{body}</div>
         {RowAddon && <RowAddon {...widgetProps} />}
         {layout !== 'inline' && <FieldError id={ids.errorId} error={error} />}

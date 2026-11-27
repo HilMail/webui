@@ -11,6 +11,7 @@ export type FormMode = 'create' | 'edit';
 
 export interface FormContextValue {
   schema: Schema;
+  viewName: string;
   mode: FormMode;
   readOnly: boolean;
   hideEnterprise: boolean;
@@ -21,6 +22,8 @@ export interface FormContextValue {
   tenantId: string | null;
   // Lets field renderers protect identity data owned by an external directory while preserving local settings edits.
   isExternalAccount: boolean;
+  // Drives subtle HilMail policy sync notices on forms even for fields that remain locally editable.
+  hasExternalDirectory: boolean;
 }
 
 export interface FieldScope {

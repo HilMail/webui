@@ -18,6 +18,7 @@ import type { Schema } from '@/types/schema';
 
 interface FormProviderProps {
   schema: Schema;
+  viewName?: string;
   mode?: FormMode;
   readOnly?: boolean;
   hideEnterprise?: boolean;
@@ -26,11 +27,14 @@ interface FormProviderProps {
   tenantId?: string | null;
   // This is supplied only for externally provisioned accounts so child field rows can apply selective locks.
   isExternalAccount?: boolean;
+  // Signals that an external directory is configured so field rows can surface HilMail sync guardrails.
+  hasExternalDirectory?: boolean;
   children: ReactNode;
 }
 
 export function FormProvider({
   schema,
+  viewName = '',
   mode = 'edit',
   readOnly = false,
   hideEnterprise = false,
@@ -38,12 +42,14 @@ export function FormProvider({
   baseline = null,
   tenantId = null,
   isExternalAccount = false,
+  hasExternalDirectory = false,
   children,
 }: FormProviderProps) {
   const isCommunity = useIsCommunity();
   const idPrefix = `f${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
   const value: FormContextValue = {
     schema,
+    viewName,
     mode,
     readOnly,
     hideEnterprise,
@@ -53,6 +59,7 @@ export function FormProvider({
     baseline,
     tenantId,
     isExternalAccount,
+    hasExternalDirectory,
   };
   const scope: FieldScope = { path: [], readOnly };
   return (

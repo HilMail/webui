@@ -133,7 +133,7 @@ export function TopBar() {
               <User aria-hidden="true" className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="min-w-56 max-w-[min(22rem,calc(100vw-1rem))]">
             {navigableLayouts.length > 0 && (
               <>
                 <DropdownMenuLabel>{t('sections', 'Sections')}</DropdownMenuLabel>
@@ -148,7 +148,7 @@ export function TopBar() {
                       }}
                     >
                       <DynamicIcon name={layout.icon} className="mr-2 h-4 w-4" />
-                      {layout.name}
+                      <span className="min-w-0 truncate">{layout.name}</span>
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
@@ -160,11 +160,15 @@ export function TopBar() {
               <>
                 <DropdownMenuLabel>{t('accounts', 'Accounts')}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={activeAccountId ?? ''} onValueChange={switchAccount}>
-                  {Object.entries(accounts).map(([id, info]) => (
-                    <DropdownMenuRadioItem key={id} value={id}>
-                      {info.name || id}
-                    </DropdownMenuRadioItem>
-                  ))}
+                  {Object.entries(accounts).map(([id, info]) => {
+                    const accountLabel = info.name || id;
+                    return (
+                      // Allow long email addresses/domains to expand up to max-w or wrap cleanly instead of clipping in a fixed w-56 menu.
+                      <DropdownMenuRadioItem key={id} value={id} title={accountLabel}>
+                        <span className="min-w-0 wrap-anywhere">{accountLabel}</span>
+                      </DropdownMenuRadioItem>
+                    );
+                  })}
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
               </>

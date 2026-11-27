@@ -17,6 +17,7 @@ import { useIsCommunity, usePermissionCheckers } from '@/hooks/usePermissions';
 import { useResolvedView } from '@/hooks/useResolvedView';
 import { layoutViewFor } from '@/lib/layout';
 import { canAccessView } from '@/lib/permissions';
+import { resolveContextualActions } from '@/lib/contextualActions';
 import { buildQueuedMessageJumps } from '@/lib/queueOpsLinks';
 import { isClientSortableColumn } from '@/lib/schemaDeviationTypes';
 import { getDisplayProperty, resolveObject } from '@/lib/schemaResolver';
@@ -29,6 +30,7 @@ import type { List, Schema } from '@/types/schema';
 import type { ResolvedView } from '@/lib/schemaResolver';
 
 import { QUOTA_STATE_FILTER_KEY, QUOTA_STATES, type QuotaStateFilter } from './clientList';
+import { ContextualActionBar } from './ContextualActionBar';
 import { FilterBar } from './FilterBar';
 import { ExportCsvButton } from './ExportCsvButton';
 import { ListTable } from './ListTable';
@@ -293,6 +295,7 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
 
   const isQueuedMessage = objectName === 'x:QueuedMessage';
   const showRowActionsColumn = itemActions.length > 0 || isQueuedMessage;
+  const contextualActions = resolveContextualActions(schema, objectName, checkers);
   const loadedRows = listState.allRows ?? items;
   const exportFileBase = viewName
     .replace(/^x:/, '')
@@ -312,6 +315,7 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
               {t('list.managedByExternalDirectory', 'Managed by external directory')}
             </span>
           )}
+          <ContextualActionBar actions={contextualActions} onSuccess={listState.refetch} />
           <ExportCsvButton
             schema={schema}
             objectName={objectName}

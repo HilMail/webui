@@ -107,8 +107,10 @@ vi.mock('@/data/listAll', () => ({
   },
 }));
 
+const mockSetMutateAsync = vi.fn().mockResolvedValue({ created: { 'action-0': { id: '1' } } });
+
 vi.mock('@/data/mutations', () => ({
-  useJmapSet: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useJmapSet: () => ({ mutateAsync: mockSetMutateAsync, isPending: false }),
   useJmapBulkSet: () => ({ mutateAsync: vi.fn(), isPending: false }),
   invalidateObjectType: vi.fn(),
 }));
@@ -116,6 +118,7 @@ vi.mock('@/data/mutations', () => ({
 function makeTestSchema(): Schema {
   return withAccountListColumns({
     objects: {
+      'x:Action': { type: 'object', description: 'Action', permissionPrefix: 'sysAction' },
       'x:Account': { type: 'object', description: 'Account', permissionPrefix: 'account' },
       'x:Account/User': { type: 'view', objectName: 'x:Account' },
       'x:Domain': { type: 'object', description: 'Domain', permissionPrefix: 'domain' },
@@ -374,5 +377,34 @@ describe('DynamicList fork customizations', () => {
     expect(csv).toContain('"Username","Usage / Quota","Aliases"');
     expect(csv).toContain('"alice","1 KB / 2 KB","1"');
     downloadSpy.mockRestore();
+  });
+
+  it('shows contextual cache invalidation buttons on Account list when permitted and submits x:Action/set', async () => {
+    mockSetMutateAsync.mockClear();
+    mockRows = [{ id: 'u1', name: 'alice', usedDiskQuota: 0, quotas: {}, aliases: {} }];
+
+    // Without action permissions, contextual buttons stay hidden.
+    const { unmount } = renderList('x:Account/User');
+    expect(screen.queryByRole('button', { name: 'Clear negative cache' })).not.toBeInTheDocument();
+    unmount();
+
+    useAccountStore
+      .getState()
+      .setAccountInfo(
+        ['accountGet', 'accountQuery', 'sysActionCreate', 'actionInvalidateNegativeCaches', 'actionInvalidateCaches'],
+        'community',
+        'en-US',
+      );
+    renderList('x:Account/User');
+
+    const negCacheBtn = screen.getByRole('button', { name: 'Clear negative cache' });
+    expect(screen.getByRole('button', { name: 'Clear all caches' })).toBeInTheDocument();
+
+    fireEvent.click(negCacheBtn);
+    await waitFor(() => {
+      expect(mockSetMutateAsync).toHaveBeenCalledWith({
+        create: { 'action-0': { '@type': 'InvalidateNegativeCaches' } },
+      });
+    });
   });
 });

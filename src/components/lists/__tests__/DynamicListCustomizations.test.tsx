@@ -17,9 +17,14 @@ import type { Schema } from '@/types/schema';
 
 let directoryIds: string[] = [];
 let mockRows: Record<string, unknown>[] = [];
+let mockAllError: Error | null = null;
+const serverListCache = new Map<
+  string,
+  { ids: string[]; list: Record<string, unknown>[]; total: number; position: number }
+>();
 
 vi.mock('@/data/objects', () => ({
-  useJmapList: (objectName: string | null) => {
+  useJmapList: (objectName: string | null, params?: unknown, options?: { enabled?: boolean }) => {
     if (objectName === 'x:Directory') {
       return {
         data: { ids: directoryIds, list: directoryIds.map((id) => ({ id })), total: directoryIds.length, position: 0 },
@@ -33,8 +38,60 @@ vi.mock('@/data/objects', () => ({
         refetch: vi.fn(),
       };
     }
+    const cacheKey = `${objectName}:${JSON.stringify(params ?? {})}`;
+    if (options?.enabled !== false && objectName) {
+      serverListCache.set(cacheKey, {
+        ids: mockRows.map((r) => String(r.id)),
+        list: mockRows,
+        total: mockRows.length,
+        position: 0,
+      });
+    }
+    const cached = serverListCache.get(cacheKey);
     return {
-      data: { ids: mockRows.map((r) => String(r.id)), list: mockRows, total: mockRows.length, position: 0 },
+      data: cached,
+      isPending: !cached && options?.enabled !== false,
+      isFetching: false,
+      fetchStatus: 'idle',
+      isSuccess: !!cached,
+      isPlaceholderData: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+  },
+}));
+
+vi.mock('@/data/listAll', () => ({
+  useJmapListAll: (objectName: string | null) => {
+    if (!objectName) {
+      return {
+        data: undefined,
+        isPending: false,
+        isFetching: false,
+        fetchStatus: 'idle',
+        isSuccess: false,
+        isPlaceholderData: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      };
+    }
+    if (mockAllError) {
+      return {
+        data: undefined,
+        isPending: false,
+        isFetching: false,
+        fetchStatus: 'idle',
+        isSuccess: false,
+        isPlaceholderData: false,
+        isError: true,
+        error: mockAllError,
+        refetch: vi.fn(),
+      };
+    }
+    return {
+      data: mockRows,
       isPending: false,
       isFetching: false,
       fetchStatus: 'idle',
@@ -45,20 +102,6 @@ vi.mock('@/data/objects', () => ({
       refetch: vi.fn(),
     };
   },
-}));
-
-vi.mock('@/data/listAll', () => ({
-  useJmapListAll: () => ({
-    data: mockRows,
-    isPending: false,
-    isFetching: false,
-    fetchStatus: 'idle',
-    isSuccess: true,
-    isPlaceholderData: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
 }));
 
 vi.mock('@/data/mutations', () => ({
@@ -152,6 +195,8 @@ describe('DynamicList fork customizations', () => {
   beforeEach(() => {
     directoryIds = [];
     mockRows = [];
+    mockAllError = null;
+    serverListCache.clear();
     useSchemaStore.getState().setSchema(makeTestSchema());
     useAccountStore
       .getState()
@@ -220,5 +265,33 @@ describe('DynamicList fork customizations', () => {
     const logsLink = screen.getByRole('menuitem', { name: 'View logs: sender@hilmail.co' });
     expect(traceLink).toHaveAttribute('href', '/troubleshoot/CustomComponent/LiveDelivery?target=rcpt%40example.com');
     expect(logsLink).toHaveAttribute('href', '/troubleshoot/x:Log?f.text=sender%40hilmail.co');
+  });
+
+  it('keeps existing server rows visible without collapsing headers when client-mode sort hits the 10k hard cap', () => {
+    mockRows = [
+      { id: 'u1', name: 'rizal@hilmail.co', usedDiskQuota: 850, quotas: { maxDiskQuota: 1000 }, aliases: {} },
+    ];
+    mockAllError = new Error('Refusing to load 19884 matching rows into the browser (limit 10000).');
+
+    renderList('x:Account/User');
+
+    expect(screen.getByText('rizal@hilmail.co')).toBeInTheDocument();
+
+    // Synthetic columns carry explicit width hints so empty or error states never shift Usage / Quota left.
+    const quotaHeader = screen.getByRole('button', { name: 'Usage / Quota' }).closest('th');
+    const aliasesHeader = screen.getByRole('button', { name: 'Aliases' }).closest('th');
+    expect(quotaHeader?.className).toContain('min-w-[9.5rem]');
+    expect(aliasesHeader?.className).toContain('w-24');
+
+    // Triggering synthetic client sort fails fetch-all, yet existing table rows remain rendered under the error banner.
+    fireEvent.click(screen.getByRole('button', { name: 'Usage / Quota' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Refusing to load 19884 matching rows into the browser');
+    expect(screen.getByText('rizal@hilmail.co')).toBeInTheDocument();
+    expect(screen.queryByText('No results found')).not.toBeInTheDocument();
+
+    // Dismissing the client-mode error clears the failing synthetic sort override back to normal view.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText('rizal@hilmail.co')).toBeInTheDocument();
   });
 });

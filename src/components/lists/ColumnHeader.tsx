@@ -8,10 +8,17 @@ import { useTranslation } from 'react-i18next';
 import { ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
 
 import type { Column } from '@/types/schema';
+import { cn } from '@/lib/utils';
 import type { ListSort } from './listUrlState';
 
 export const HEADER_CELL =
   'px-3.5 py-2.5 first:pl-5 last:pr-5 text-left text-[11px] font-semibold uppercase tracking-wider text-dim';
+
+// Keep fixed/minimum width hints on synthetic columns so empty tables don't redistribute columns and shift Usage / Quota left.
+const COLUMN_HEADER_CLASS: Record<string, string> = {
+  quotaUsage: 'min-w-[9.5rem] whitespace-nowrap',
+  aliasCount: 'w-24 whitespace-nowrap',
+};
 
 interface ColumnHeaderProps {
   column: Column;
@@ -23,7 +30,7 @@ interface ColumnHeaderProps {
 export function ColumnHeader({ column, sortable, sort, onSort }: ColumnHeaderProps) {
   const { t } = useTranslation();
   const direction = sort?.field === column.name ? (sort.ascending ? 'ascending' : 'descending') : 'none';
-  const className = HEADER_CELL;
+  const className = cn(HEADER_CELL, COLUMN_HEADER_CLASS[column.name]);
 
   if (!sortable) {
     return (

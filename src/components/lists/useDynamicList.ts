@@ -4,15 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { useJmapListAll } from '@/data/listAll';
 import { useJmapList } from '@/data/objects';
 import { errorMessage } from '@/lib/jmapErrors';
+import { isClientOnlyFilterEnum } from '@/lib/logFilters';
 import { JmapMethodError } from '@/services/errors';
 import type { List } from '@/types/schema';
-import { planClientMode, processClientRows } from './clientList';
+import {
+  LOG_TIME_RANGE_KEY,
+  QUOTA_STATE_FILTER_KEY,
+  isClientSortField,
+  planClientMode,
+  processClientRows,
+} from './clientList';
 import {
   LIST_PAGE_SIZE,
   buildListFilter,
@@ -47,6 +54,7 @@ export interface DynamicListState {
   error: string | null;
   applyFilters: (filters: Record<string, string>) => void;
   resetFilters: () => void;
+  clearClientOverrides: () => void;
   toggleSort: (field: string) => void;
   nextPage: () => void;
   prevPage: () => void;
@@ -71,7 +79,26 @@ export function useDynamicList(
       ? [...new Set([...pageParams.properties, ...plan.requiredProperties])]
       : pageParams.properties;
 
-  const query = useJmapList(enabledObject, pageParams, { keepPrevious: true, enabled: !plan.client });
+  // Freeze the last non-client JMAP query params so entering client mode (or hitting the 10k-row guard)
+  // retains the server-paginated table rows in cache instead of blanking to "No results found".
+  const pageParamsKey = JSON.stringify(pageParams);
+  const [lastServerQuery, setLastServerQuery] = useState(() => ({
+    key: pageParamsKey,
+    params: pageParams,
+    anchorsCount: state.anchors.length,
+  }));
+  if (!plan.client && lastServerQuery.key !== pageParamsKey) {
+    setLastServerQuery({
+      key: pageParamsKey,
+      params: pageParams,
+      anchorsCount: state.anchors.length,
+    });
+  }
+
+  const query = useJmapList(enabledObject, plan.client ? lastServerQuery.params : pageParams, {
+    keepPrevious: true,
+    enabled: !plan.client,
+  });
 
   // When client-only sorting or filtering is active, pull matching rows once and filter/sort/slice locally.
   const allQuery = useJmapListAll(plan.client ? enabledObject : null, {
@@ -89,10 +116,12 @@ export function useDynamicList(
     !query.isFetching;
 
   const active = plan.client ? allQuery : query;
+  const usingServerFallback = plan.client && sortedRows === null && !!query.data;
   let items: ListItem[];
   let total: number | null;
   let startPosition: number;
-  if (plan.client) {
+  let anchorsCount = state.anchors.length;
+  if (plan.client && !usingServerFallback) {
     const rows = sortedRows ?? EMPTY_ITEMS;
     const lastAnchor = state.anchors[state.anchors.length - 1];
     const anchorIndex = lastAnchor ? rows.findIndex((row) => itemId(row) === lastAnchor) : -1;
@@ -103,6 +132,7 @@ export function useDynamicList(
     items = query.data?.list ?? EMPTY_ITEMS;
     total = query.data?.total ?? null;
     startPosition = query.data?.position ?? 0;
+    if (usingServerFallback) anchorsCount = lastServerQuery.anchorsCount;
   }
 
   const stranded = isStrandedPage(
@@ -125,12 +155,23 @@ export function useDynamicList(
     else setSearchParams(params);
   };
 
+  const clearClientOverrides = () => {
+    const nextFilters = { ...state.filters };
+    delete nextFilters[QUOTA_STATE_FILTER_KEY];
+    delete nextFilters[LOG_TIME_RANGE_KEY];
+    for (const f of effectiveList.filters ?? []) {
+      if (isClientOnlyFilterEnum(f)) delete nextFilters[f.field];
+    }
+    const nextSortState = state.sort && isClientSortField(effectiveList, state.sort.field) ? null : state.sort;
+    navigateTo({ filters: nextFilters, sort: nextSortState, anchors: [] });
+  };
+
   return {
     state,
     stateKey,
     items,
     total,
-    range: pageRange(startPosition, items.length, total, state.anchors.length, LIST_PAGE_SIZE),
+    range: pageRange(startPosition, items.length, total, anchorsCount, LIST_PAGE_SIZE),
     jmapFilter: buildListFilter(state.filters, effectiveList, objectName ?? ''),
     jmapSort: buildListSort(serverSort(state.sort, effectiveList)),
     clientMode: plan.client,
@@ -140,6 +181,7 @@ export function useDynamicList(
     error: active.isError && !anchorLost ? errorMessage(active.error) : null,
     applyFilters: (filters) => navigateTo({ filters, sort: state.sort, anchors: [] }),
     resetFilters: () => navigateTo({ filters: {}, sort: null, anchors: [] }),
+    clearClientOverrides,
     toggleSort: (field) => navigateTo({ filters: state.filters, sort: nextSort(state.sort, field), anchors: [] }),
     nextPage: () => {
       const last = items.length > 0 ? itemId(items[items.length - 1]) : null;

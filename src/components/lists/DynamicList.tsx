@@ -308,7 +308,13 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
         </div>
       </div>
 
-      {listState.error && <ListError message={listState.error} onRetry={listState.refetch} />}
+      {listState.error && (
+        <ListError
+          message={listState.error}
+          onRetry={listState.refetch}
+          onDismiss={listState.clientMode ? listState.clearClientOverrides : undefined}
+        />
+      )}
       {actions.error && <ListError message={actions.error} onDismiss={actions.clearError} />}
 
       <section className="tile relative overflow-hidden">

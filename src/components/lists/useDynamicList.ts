@@ -7,19 +7,21 @@
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
+import { useJmapListAll } from '@/data/listAll';
 import { useJmapList } from '@/data/objects';
 import { errorMessage } from '@/lib/jmapErrors';
 import { JmapMethodError } from '@/services/errors';
 import type { List } from '@/types/schema';
+import { planClientMode, sortClientRows } from './clientList';
 import {
   LIST_PAGE_SIZE,
   buildListFilter,
   buildListPageParams,
   buildListSort,
-  effectiveSort,
   isStrandedPage,
   itemId,
   pageRange,
+  serverSort,
   type ListItem,
   type PageRange,
 } from './listQuery';
@@ -36,6 +38,10 @@ export interface DynamicListState {
   range: PageRange;
   jmapFilter: Record<string, unknown> | undefined;
   jmapSort: Record<string, unknown>[] | undefined;
+  /** True when rows are fetched in full and sorted/paginated in the browser. */
+  clientMode: boolean;
+  /** Full matching row set when clientMode is active. */
+  allRows: ListItem[] | null;
   isLoading: boolean;
   isFetching: boolean;
   error: string | null;
@@ -58,22 +64,47 @@ export function useDynamicList(
   const effectiveList = list ?? EMPTY_LIST;
   const enabledObject = list && objectName ? objectName : null;
 
-  const query = useJmapList(
-    enabledObject,
-    buildListPageParams(state, effectiveList, objectName ?? '', LIST_PAGE_SIZE, labelProperty),
-    { keepPrevious: true },
-  );
+  const plan = planClientMode(effectiveList, state);
+  const pageParams = buildListPageParams(state, effectiveList, objectName ?? '', LIST_PAGE_SIZE, labelProperty);
+
+  const query = useJmapList(enabledObject, pageParams, { keepPrevious: true, enabled: !plan.client });
+
+  // When sorting by a synthetic column, pull all matching rows once and sort/slice locally.
+  const allQuery = useJmapListAll(plan.client ? enabledObject : null, {
+    filter: pageParams.filter,
+    sort: pageParams.sort,
+    properties: pageParams.properties,
+  });
+  const sortedRows = plan.client && allQuery.data ? sortClientRows(allQuery.data, plan.clientSort) : null;
 
   const anchorLost =
+    !plan.client &&
     state.anchors.length > 0 &&
     query.error instanceof JmapMethodError &&
     query.error.type === 'anchorNotFound' &&
     !query.isFetching;
 
+  const active = plan.client ? allQuery : query;
+  let items: ListItem[];
+  let total: number | null;
+  let startPosition: number;
+  if (plan.client) {
+    const rows = sortedRows ?? EMPTY_ITEMS;
+    const lastAnchor = state.anchors[state.anchors.length - 1];
+    const anchorIndex = lastAnchor ? rows.findIndex((row) => itemId(row) === lastAnchor) : -1;
+    startPosition = lastAnchor ? (anchorIndex === -1 ? rows.length : anchorIndex + 1) : 0;
+    items = rows.slice(startPosition, startPosition + LIST_PAGE_SIZE);
+    total = sortedRows ? rows.length : null;
+  } else {
+    items = query.data?.list ?? EMPTY_ITEMS;
+    total = query.data?.total ?? null;
+    startPosition = query.data?.position ?? 0;
+  }
+
   const stranded = isStrandedPage(
     state.anchors.length,
-    query.data?.list.length ?? 0,
-    query.isSuccess && !query.isPlaceholderData && !query.isFetching,
+    items.length,
+    active.isSuccess && !active.isPlaceholderData && !active.isFetching,
   );
   const recovery = anchorLost ? 'reset' : stranded ? 'back' : null;
 
@@ -86,25 +117,23 @@ export function useDynamicList(
 
   const navigateTo = (next: ListUrlState) => {
     const params = serializeListSearch(next);
-    if (params.toString() === stateKey) void query.refetch();
+    if (params.toString() === stateKey) void active.refetch();
     else setSearchParams(params);
   };
-
-  const items = query.data?.list ?? EMPTY_ITEMS;
-  const total = query.data?.total ?? null;
-  const position = query.data?.position ?? 0;
 
   return {
     state,
     stateKey,
     items,
     total,
-    range: pageRange(position, items.length, total, state.anchors.length, LIST_PAGE_SIZE),
+    range: pageRange(startPosition, items.length, total, state.anchors.length, LIST_PAGE_SIZE),
     jmapFilter: buildListFilter(state.filters, effectiveList, objectName ?? ''),
-    jmapSort: buildListSort(effectiveSort(state.sort, effectiveList)),
-    isLoading: query.isPending && query.fetchStatus !== 'idle',
-    isFetching: query.isFetching,
-    error: query.isError && !anchorLost ? errorMessage(query.error) : null,
+    jmapSort: buildListSort(serverSort(state.sort, effectiveList)),
+    clientMode: plan.client,
+    allRows: sortedRows,
+    isLoading: active.isPending && active.fetchStatus !== 'idle',
+    isFetching: active.isFetching,
+    error: active.isError && !anchorLost ? errorMessage(active.error) : null,
     applyFilters: (filters) => navigateTo({ filters, sort: state.sort, anchors: [] }),
     resetFilters: () => navigateTo({ filters: {}, sort: null, anchors: [] }),
     toggleSort: (field) => navigateTo({ filters: state.filters, sort: nextSort(state.sort, field), anchors: [] }),
@@ -115,6 +144,6 @@ export function useDynamicList(
     prevPage: () => {
       if (state.anchors.length > 0) navigateTo({ ...state, anchors: state.anchors.slice(0, -1) });
     },
-    refetch: () => void query.refetch(),
+    refetch: () => void active.refetch(),
   };
 }

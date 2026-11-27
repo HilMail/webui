@@ -7,6 +7,8 @@
 import { buildJmapFilter } from '@/lib/listFilter';
 import type { ListPageParams } from '@/data/keys';
 import type { ResolvedSchema } from '@/lib/schemaResolver';
+import { isClientSortableColumn } from '@/lib/schemaDeviationTypes';
+import { expandListProperties } from '@/lib/syntheticColumns';
 import type { Field, List } from '@/types/schema';
 import type { ListSort, ListUrlState } from './listUrlState';
 
@@ -37,8 +39,18 @@ export function buildListFilter(
   return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
-export function effectiveSort(sort: ListSort | null, list: Pick<List, 'sort'>): ListSort | null {
-  return sort && list.sort?.includes(sort.field) ? sort : null;
+export function effectiveSort(sort: ListSort | null, list: Pick<List, 'sort' | 'columns'>): ListSort | null {
+  if (!sort) return null;
+  // Accept client-sortable synthetic columns alongside server-declared sort fields.
+  const clientSortable = list.columns.some((c) => c.name === sort.field && isClientSortableColumn(c));
+  return list.sort?.includes(sort.field) || clientSortable ? sort : null;
+}
+
+/** Returns only server-supported sort criteria so synthetic columns are never sent to JMAP `/query`. */
+export function serverSort(sort: ListSort | null, list: Pick<List, 'sort' | 'columns'>): ListSort | null {
+  const effective = effectiveSort(sort, list);
+  if (!effective || list.sort?.includes(effective.field)) return effective;
+  return null;
 }
 
 export function buildListSort(sort: ListSort | null): Record<string, unknown>[] | undefined {
@@ -52,11 +64,12 @@ export function buildListPageParams(
   pageSize = LIST_PAGE_SIZE,
   labelProperty?: string,
 ): ListPageParams {
-  const properties = ['id', ...list.columns.map((c) => c.name)];
+  // Expand synthetic columns into the real JMAP properties they compute from.
+  const properties = expandListProperties(list.columns);
   if (labelProperty && !properties.includes(labelProperty)) properties.push(labelProperty);
   const params: ListPageParams = {
     filter: buildListFilter(state.filters, list, objectName),
-    sort: buildListSort(effectiveSort(state.sort, list)),
+    sort: buildListSort(serverSort(state.sort, list)),
     limit: pageSize,
     calculateTotal: true,
     properties,

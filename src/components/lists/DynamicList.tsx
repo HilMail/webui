@@ -17,6 +17,7 @@ import { useIsCommunity, usePermissionCheckers } from '@/hooks/usePermissions';
 import { useResolvedView } from '@/hooks/useResolvedView';
 import { layoutViewFor } from '@/lib/layout';
 import { canAccessView } from '@/lib/permissions';
+import { isClientSortableColumn } from '@/lib/schemaDeviationTypes';
 import { getDisplayProperty } from '@/lib/schemaResolver';
 import { useSchemaStore } from '@/stores/schemaStore';
 import type { List, Schema } from '@/types/schema';
@@ -123,21 +124,33 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
     (f) => f.type !== 'objectId' || canAccessView(schema, f.objectName, 'Get', checkers),
   );
 
+  // Include client-sortable synthetic columns alongside server-declared sort fields.
+  const sortableColumns = new Set([
+    ...(list.sort ?? []),
+    ...list.columns.filter(isClientSortableColumn).map((c) => c.name),
+  ]);
+
   const busy = listState.isFetching || actions.pending;
   const selectedCount = selection.allMatching ? (total ?? selection.selectedIds.length) : selection.selectedIds.length;
   const nameFor = (count: number) => (count === 1 ? list.singularName : list.pluralName);
+
+  // In client mode, resolve "all matching" locally via fetched row IDs so we don't send a client sort to JMAP.
+  const massTarget = () => ({
+    ids:
+      selection.allMatching && listState.allRows
+        ? listState.allRows.flatMap((row) => itemId(row) ?? [])
+        : selection.selectedIds,
+    allMatching: selection.allMatching && !listState.clientMode,
+    filter: listState.jmapFilter,
+    sort: listState.jmapSort,
+  });
 
   const confirmMassAction = (action: RunnableMassAction) => {
     const count = selectedCount;
     const name = nameFor(count);
     const allMatching = selection.allMatching;
     const run = async () => {
-      const ok = await actions.runMassAction(action, {
-        ids: selection.selectedIds,
-        allMatching,
-        filter: listState.jmapFilter,
-        sort: listState.jmapSort,
-      });
+      const ok = await actions.runMassAction(action, massTarget());
       if (ok) selection.clear();
     };
     if (action.type === 'delete') {
@@ -270,7 +283,7 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
           schema={schema}
           objectName={objectName}
           sort={state.sort}
-          sortable={new Set(list.sort ?? [])}
+          sortable={sortableColumns}
           onSort={listState.toggleSort}
           selection={massActions.length > 0 ? selection : null}
           rowHref={(id) => (section ? `/${section}/${viewName}/${id}` : null)}

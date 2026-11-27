@@ -13,6 +13,7 @@ import {
   MANAGEMENT_CAPABILITY,
   type JmapSession,
 } from '@/services/jmap/client';
+import { withAccountListColumns } from '@/lib/accountColumns';
 import { useAuthStore, type AccountInfo } from '@/stores/authStore';
 import { useSchemaStore } from '@/stores/schemaStore';
 import { useAccountStore } from '@/stores/accountStore';
@@ -62,7 +63,8 @@ export async function initializeSession(signal?: AbortSignal): Promise<true> {
   useAuthStore
     .getState()
     .setSession(info.accounts, info.primaryAccountId, info.apiUrl, info.maxObjectsInGet, info.maxObjectsInSet);
-  useSchemaStore.getState().setSchema(schema);
+  // Patch client-side synthetic columns (Usage / Quota, Aliases) onto the fetched schema before indexing/rendering.
+  useSchemaStore.getState().setSchema(withAccountListColumns(schema));
   useAccountStore.getState().setAccountInfo(account.permissions, account.edition, account.locale);
   setLocale(account.locale);
   return true;

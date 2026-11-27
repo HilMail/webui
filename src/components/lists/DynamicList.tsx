@@ -24,6 +24,7 @@ import { QUOTA_USAGE_COLUMN } from '@/lib/syntheticColumns';
 import { cn } from '@/lib/utils';
 import { useAccountStore } from '@/stores/accountStore';
 import { useSchemaStore } from '@/stores/schemaStore';
+import { useUIStore } from '@/stores/uiStore';
 import type { List, Schema } from '@/types/schema';
 import type { ResolvedView } from '@/lib/schemaResolver';
 
@@ -81,6 +82,7 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
   const checkers = usePermissionCheckers();
   const isCommunity = useIsCommunity();
   const edition = useAccountStore((s) => s.edition);
+  const setListPageSize = useUIStore((s) => s.setListPageSize);
   const [upsellOpen, setUpsellOpen] = useState(false);
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
@@ -393,6 +395,12 @@ function DynamicListView({ viewName, schema, resolved, list }: DynamicListViewPr
             count={items.length}
             pluralName={list.pluralName}
             disabled={listState.isFetching}
+            pageSize={listState.pageSize}
+            onPageSize={(nextSize) => {
+              setListPageSize(nextSize);
+              selection.clear();
+              listState.resetPage();
+            }}
             onPrev={listState.prevPage}
             onNext={listState.nextPage}
           />

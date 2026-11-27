@@ -13,7 +13,13 @@ import { expandListProperties } from '@/lib/syntheticColumns';
 import type { Field, List } from '@/types/schema';
 import type { ListSort, ListUrlState } from './listUrlState';
 
-export const LIST_PAGE_SIZE = 25;
+export const LIST_PAGE_SIZE = 100;
+export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
+
+/** Clamps persisted or user-supplied page sizes to supported options, defaulting to 100 rows. */
+export function sanitizePageSize(value: unknown): number {
+  return typeof value === 'number' && (PAGE_SIZE_OPTIONS as readonly number[]).includes(value) ? value : LIST_PAGE_SIZE;
+}
 
 export type ListItem = Record<string, unknown>;
 

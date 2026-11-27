@@ -12,6 +12,7 @@ import { useJmapList } from '@/data/objects';
 import { errorMessage } from '@/lib/jmapErrors';
 import { isClientOnlyFilterEnum } from '@/lib/logFilters';
 import { JmapMethodError } from '@/services/errors';
+import { useUIStore } from '@/stores/uiStore';
 import type { List } from '@/types/schema';
 import {
   LOG_TIME_RANGE_KEY,
@@ -21,13 +22,13 @@ import {
   processClientRows,
 } from './clientList';
 import {
-  LIST_PAGE_SIZE,
   buildListFilter,
   buildListPageParams,
   buildListSort,
   isStrandedPage,
   itemId,
   pageRange,
+  sanitizePageSize,
   serverSort,
   type ListItem,
   type PageRange,
@@ -43,6 +44,7 @@ export interface DynamicListState {
   items: ListItem[];
   total: number | null;
   range: PageRange;
+  pageSize: number;
   jmapFilter: Record<string, unknown> | undefined;
   jmapSort: Record<string, unknown>[] | undefined;
   /** True when rows are fetched in full and sorted/paginated in the browser. */
@@ -56,6 +58,7 @@ export interface DynamicListState {
   resetFilters: () => void;
   clearClientOverrides: () => void;
   toggleSort: (field: string) => void;
+  resetPage: () => void;
   nextPage: () => void;
   prevPage: () => void;
   refetch: () => void;
@@ -71,9 +74,10 @@ export function useDynamicList(
   const stateKey = listStateKey(state);
   const effectiveList = list ?? EMPTY_LIST;
   const enabledObject = list && objectName ? objectName : null;
+  const pageSize = sanitizePageSize(useUIStore((s) => s.listPageSize));
 
   const plan = planClientMode(effectiveList, objectName ?? '', state);
-  const pageParams = buildListPageParams(state, effectiveList, objectName ?? '', LIST_PAGE_SIZE, labelProperty);
+  const pageParams = buildListPageParams(state, effectiveList, objectName ?? '', pageSize, labelProperty);
   const allProperties =
     plan.requiredProperties.length > 0 && pageParams.properties
       ? [...new Set([...pageParams.properties, ...plan.requiredProperties])]
@@ -126,7 +130,7 @@ export function useDynamicList(
     const lastAnchor = state.anchors[state.anchors.length - 1];
     const anchorIndex = lastAnchor ? rows.findIndex((row) => itemId(row) === lastAnchor) : -1;
     startPosition = lastAnchor ? (anchorIndex === -1 ? rows.length : anchorIndex + 1) : 0;
-    items = rows.slice(startPosition, startPosition + LIST_PAGE_SIZE);
+    items = rows.slice(startPosition, startPosition + pageSize);
     total = sortedRows ? rows.length : null;
   } else {
     items = query.data?.list ?? EMPTY_ITEMS;
@@ -171,7 +175,8 @@ export function useDynamicList(
     stateKey,
     items,
     total,
-    range: pageRange(startPosition, items.length, total, anchorsCount, LIST_PAGE_SIZE),
+    range: pageRange(startPosition, items.length, total, anchorsCount, pageSize),
+    pageSize,
     jmapFilter: buildListFilter(state.filters, effectiveList, objectName ?? ''),
     jmapSort: buildListSort(serverSort(state.sort, effectiveList)),
     clientMode: plan.client,
@@ -183,6 +188,7 @@ export function useDynamicList(
     resetFilters: () => navigateTo({ filters: {}, sort: null, anchors: [] }),
     clearClientOverrides,
     toggleSort: (field) => navigateTo({ filters: state.filters, sort: nextSort(state.sort, field), anchors: [] }),
+    resetPage: () => navigateTo({ ...state, anchors: [] }),
     nextPage: () => {
       const last = items.length > 0 ? itemId(items[items.length - 1]) : null;
       if (last) navigateTo({ ...state, anchors: [...state.anchors, last] });

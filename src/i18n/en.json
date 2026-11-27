@@ -403,6 +403,7 @@
     "next": "Next",
     "noListConfigured": "This view has no list configured.",
     "noResults": "No results found",
+    "pageSize": "Rows per page",
     "pagination": "Pagination",
     "previous": "Previous",
     "resetFilters": "Reset",

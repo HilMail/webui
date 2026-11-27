@@ -39,6 +39,16 @@ if (typeof Range !== 'undefined') {
   }
 }
 
+// Provide minimal pointer/scroll shims in jsdom for Radix Select popovers during tests.
+if (typeof Element !== 'undefined') {
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = () => false;
+  }
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {};
+  }
+}
+
 // Ensure each test starts with an unmounted DOM tree when explicit globals are disabled.
 afterEach(() => {
   cleanup();

@@ -8,7 +8,8 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import type { PageRange } from './listQuery';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PAGE_SIZE_OPTIONS, type PageRange } from './listQuery';
 
 interface PaginationProps {
   range: PageRange;
@@ -16,11 +17,23 @@ interface PaginationProps {
   count: number;
   pluralName: string;
   disabled: boolean;
+  pageSize: number;
+  onPageSize: (size: number) => void;
   onPrev: () => void;
   onNext: () => void;
 }
 
-export function Pagination({ range, total, count, pluralName, disabled, onPrev, onNext }: PaginationProps) {
+export function Pagination({
+  range,
+  total,
+  count,
+  pluralName,
+  disabled,
+  pageSize,
+  onPageSize,
+  onPrev,
+  onNext,
+}: PaginationProps) {
   const { t } = useTranslation();
   return (
     <nav
@@ -38,6 +51,26 @@ export function Pagination({ range, total, count, pluralName, disabled, onPrev, 
           : t('list.showingItems', 'Showing {{count}} items', { count })}
       </p>
       <div className="flex items-center gap-1.5">
+        {/* Allow stepping rows per page up or down without URL churn; persisted in uiStore. */}
+        <Select
+          value={String(pageSize)}
+          onValueChange={(value) => {
+            const next = Number(value);
+            if ((PAGE_SIZE_OPTIONS as readonly number[]).includes(next)) onPageSize(next);
+          }}
+          disabled={disabled}
+        >
+          <SelectTrigger className="h-8 w-[5.5rem]" aria-label={t('list.pageSize', 'Rows per page')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <SelectItem key={size} value={String(size)}>
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="secondary" size="sm" disabled={!range.hasPrev || disabled} onClick={onPrev}>
           <ChevronLeft aria-hidden />
           {t('list.previous', 'Previous')}

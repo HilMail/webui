@@ -13,6 +13,7 @@ import { DynamicList } from '@/components/lists/DynamicList';
 import { withAccountListColumns } from '@/lib/accountColumns';
 import { useAccountStore } from '@/stores/accountStore';
 import { useSchemaStore } from '@/stores/schemaStore';
+import { useUIStore } from '@/stores/uiStore';
 import type { Schema } from '@/types/schema';
 
 let directoryIds: string[] = [];
@@ -197,6 +198,7 @@ describe('DynamicList fork customizations', () => {
     mockRows = [];
     mockAllError = null;
     serverListCache.clear();
+    useUIStore.getState().setListPageSize(100);
     useSchemaStore.getState().setSchema(makeTestSchema());
     useAccountStore
       .getState()
@@ -293,5 +295,21 @@ describe('DynamicList fork customizations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByText('rizal@hilmail.co')).toBeInTheDocument();
+  });
+
+  it('defaults page size to 100 and updates uiStore when changing rows per page', () => {
+    mockRows = [{ id: 'u1', name: 'alice', usedDiskQuota: 0, quotas: {}, aliases: {} }];
+    renderList('x:Account/User');
+
+    // Verify default query limit of 100 is requested from JMAP.
+    const keys = Array.from(serverListCache.keys());
+    expect(keys.some((k) => k.includes('"limit":100'))).toBe(true);
+
+    const selector = screen.getByRole('combobox', { name: 'Rows per page' });
+    expect(selector).toHaveTextContent('100');
+
+    fireEvent.keyDown(selector, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('option', { name: '50' }));
+    expect(useUIStore.getState().listPageSize).toBe(50);
   });
 });

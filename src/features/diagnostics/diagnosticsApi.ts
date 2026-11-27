@@ -271,6 +271,63 @@ export interface FetchPrometheusOptions {
   credentials?: { username: string; password: string };
 }
 
+export interface PrometheusCredentials {
+  username: string;
+  password: string;
+}
+
+const PROMETHEUS_CREDS_STORAGE_KEY = 'stalwart-prometheus-creds';
+
+/** Reads saved Prometheus Basic Auth credentials scoped by API origin so reloads skip re-prompting. */
+export function loadSavedPrometheusCredentials(): PrometheusCredentials | null {
+  try {
+    const raw = localStorage.getItem(PROMETHEUS_CREDS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const entry = parsed[getApiBaseUrl()];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const obj = entry as Record<string, unknown>;
+    if (typeof obj.username === 'string' && typeof obj.password === 'string' && obj.username && obj.password) {
+      return { username: obj.username, password: obj.password };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePrometheusCredentials(credentials: PrometheusCredentials): void {
+  try {
+    const raw = localStorage.getItem(PROMETHEUS_CREDS_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const next = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    next[getApiBaseUrl()] = { username: credentials.username, password: credentials.password };
+    localStorage.setItem(PROMETHEUS_CREDS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore storage errors (e.g. restricted/private browser contexts).
+  }
+}
+
+export function clearSavedPrometheusCredentials(): void {
+  try {
+    const raw = localStorage.getItem(PROMETHEUS_CREDS_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      localStorage.removeItem(PROMETHEUS_CREDS_STORAGE_KEY);
+      return;
+    }
+    delete parsed[getApiBaseUrl()];
+    if (Object.keys(parsed).length === 0) {
+      localStorage.removeItem(PROMETHEUS_CREDS_STORAGE_KEY);
+    } else {
+      localStorage.setItem(PROMETHEUS_CREDS_STORAGE_KEY, JSON.stringify(parsed));
+    }
+  } catch {
+    // Ignore storage errors cleanly.
+  }
+}
+
 /** Fetches and parses Stalwart's Community-accessible `/metrics/prometheus` exposition endpoint. */
 export async function fetchPrometheusSnapshot(options: FetchPrometheusOptions = {}): Promise<PrometheusSnapshotResult> {
   const { signal, credentials } = options;

@@ -47,6 +47,7 @@ function renderPage() {
 describe('CommunityHealthPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    diagnosticsApi.clearSavedPrometheusCredentials();
     useSchemaStore.getState().setSchema(createDiagnosticsSchema());
     useAccountStore.getState().setAccountInfo(['metricsGet'], 'community', 'en-US');
     useAuthStore.setState({
@@ -165,5 +166,52 @@ describe('CommunityHealthPage', () => {
       });
       expect(screen.getByText('queue_messages')).toBeInTheDocument();
     });
+    expect(diagnosticsApi.loadSavedPrometheusCredentials()).toEqual({
+      username: 'prometheus',
+      password: 'scrape-pass',
+    });
+
+    // Forget password removes saved creds and returns cleanly to the credential form.
+    fireEvent.click(screen.getByRole('button', { name: 'Forget password' }));
+    expect(diagnosticsApi.loadSavedPrometheusCredentials()).toBeNull();
+    expect(screen.getByLabelText('Prometheus password')).toHaveValue('');
+  });
+
+  it('auto-loads Prometheus metrics on refresh when credentials were saved previously', async () => {
+    diagnosticsApi.savePrometheusCredentials({ username: 'prometheus', password: 'saved-secret' });
+    vi.spyOn(diagnosticsApi, 'fetchHealthStatus').mockResolvedValue({
+      live: { ok: true, status: 200, elapsedMs: 2 },
+      ready: { ok: true, status: 200, elapsedMs: 3 },
+      checkedAt: Date.now(),
+    });
+    vi.spyOn(diagnosticsApi, 'fetchEmailDiscovery').mockResolvedValue({
+      email: 'admin@hilmail.co',
+      oidc: {
+        authorization_endpoint: 'https://mail.hilmail.co/login',
+        token_endpoint: 'https://mail.hilmail.co/auth/token',
+      },
+      mailServers: [],
+      autoconfigAvailable: false,
+    });
+    vi.spyOn(diagnosticsApi, 'fetchPrometheusConfig').mockResolvedValue({
+      mode: 'basicAuth',
+      username: 'prometheus',
+    });
+    const promSpy = vi.spyOn(diagnosticsApi, 'fetchPrometheusSnapshot').mockResolvedValue({
+      status: 'ok',
+      rawLines: 1,
+      metrics: [{ name: 'smtp_connections_total', type: 'counter', help: 'SMTP total', value: 12 }],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText('smtp_connections_total')).toBeInTheDocument();
+    });
+    expect(promSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentials: { username: 'prometheus', password: 'saved-secret' },
+      }),
+    );
   });
 });

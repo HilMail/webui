@@ -7,12 +7,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  clearSavedPrometheusCredentials,
   fetchEmailDiscovery,
   fetchHealthStatus,
   fetchPrometheusConfig,
   fetchPrometheusSnapshot,
+  loadSavedPrometheusCredentials,
   parseAutoconfigXml,
   parsePrometheusMetrics,
+  savePrometheusCredentials,
 } from '@/features/diagnostics/diagnosticsApi';
 import * as jmapClient from '@/services/jmap/client';
 import type { Schema } from '@/types/schema';
@@ -177,5 +180,16 @@ describe('diagnosticsApi', () => {
     });
     expect(await fetchPrometheusConfig(schema, () => true)).toEqual({ mode: 'disabled' });
     expect(await fetchPrometheusConfig(schema, () => false)).toEqual({ mode: 'unknown' });
+  });
+
+  it('persists, reads, and clears Prometheus scrape credentials by API origin', () => {
+    clearSavedPrometheusCredentials();
+    expect(loadSavedPrometheusCredentials()).toBeNull();
+
+    savePrometheusCredentials({ username: 'prometheus', password: 'secret' });
+    expect(loadSavedPrometheusCredentials()).toEqual({ username: 'prometheus', password: 'secret' });
+
+    clearSavedPrometheusCredentials();
+    expect(loadSavedPrometheusCredentials()).toBeNull();
   });
 });

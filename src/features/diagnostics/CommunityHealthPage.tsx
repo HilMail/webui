@@ -28,10 +28,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
+  clearSavedPrometheusCredentials,
   fetchEmailDiscovery,
   fetchHealthStatus,
   fetchPrometheusConfig,
   fetchPrometheusSnapshot,
+  loadSavedPrometheusCredentials,
+  savePrometheusCredentials,
   type EmailDiscoveryResult,
   type EndpointHealth,
   type HealthSnapshot,
@@ -115,13 +118,14 @@ export function CommunityHealthPage() {
   const [discovery, setDiscovery] = useState<EmailDiscoveryResult | null>(null);
   const [discoverManualLoading, setDiscoverManualLoading] = useState(false);
 
+  const [savedCreds, setSavedCreds] = useState(() => loadSavedPrometheusCredentials());
   const [promConfig, setPromConfig] = useState<PrometheusConfigInfo | null>(null);
   const [prom, setProm] = useState<PrometheusSnapshotResult | null>(null);
   const [promManualLoading, setPromManualLoading] = useState(false);
   const [promQuery, setPromQuery] = useState('');
   const [hideZeroMetrics, setHideZeroMetrics] = useState(true);
-  const [promUsername, setPromUsername] = useState('');
-  const [promPassword, setPromPassword] = useState('');
+  const [promUsername, setPromUsername] = useState(() => savedCreds?.username ?? '');
+  const [promPassword, setPromPassword] = useState(() => savedCreds?.password ?? '');
   const [promAuthFailed, setPromAuthFailed] = useState(false);
 
   const metricsSettingsHref = useMemo(() => {
@@ -134,7 +138,9 @@ export function CommunityHealthPage() {
 
   const healthLoading = health === null || healthManualLoading;
   const discoverLoading = discoverManualLoading || (defaultAccountEmail.includes('@') && discovery === null);
-  const promLoading = promConfig === null || (promConfig.mode === 'open' && prom === null) || promManualLoading;
+  const willAutoFetchProm =
+    promConfig?.mode === 'open' || ((promConfig?.mode === 'basicAuth' || promConfig?.mode === 'unknown') && savedCreds !== null);
+  const promLoading = promConfig === null || (willAutoFetchProm && prom === null) || promManualLoading;
 
   const refreshHealth = useCallback(async () => {
     setHealthManualLoading(true);
@@ -149,23 +155,29 @@ export function CommunityHealthPage() {
   const refreshPrometheus = useCallback(async () => {
     setPromManualLoading(true);
     try {
-      const creds =
-        promUsername.trim() && promPassword
-          ? { username: promUsername.trim(), password: promPassword }
-          : undefined;
-      if (promConfig?.mode === 'basicAuth' && !creds) {
+      const activeCreds =
+        savedCreds ??
+        (promUsername.trim() && promPassword ? { username: promUsername.trim(), password: promPassword } : undefined);
+      if (promConfig?.mode === 'basicAuth' && !activeCreds) {
         return;
       }
-      const next = await fetchPrometheusSnapshot({ credentials: creds });
+      const next = await fetchPrometheusSnapshot({ credentials: activeCreds });
+      if (next.status === 'authRequired' && savedCreds) {
+        clearSavedPrometheusCredentials();
+        setSavedCreds(null);
+        setPromPassword('');
+        setPromAuthFailed(true);
+      }
       setProm(next);
     } finally {
       setPromManualLoading(false);
     }
-  }, [promConfig, promUsername, promPassword]);
+  }, [promConfig, savedCreds, promUsername, promPassword]);
 
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    const initialSaved = loadSavedPrometheusCredentials();
 
     void fetchHealthStatus(controller.signal)
       .then((next) => {
@@ -173,20 +185,37 @@ export function CommunityHealthPage() {
       })
       .catch(() => {});
 
-    // Inspect x:Metrics config first so Basic-Auth endpoints never trigger an unexpected browser login popup on mount.
+    // Inspect x:Metrics config first so Basic-Auth endpoints never trigger an unexpected browser login popup on mount,
+    // while saved scrape credentials are reused seamlessly across reloads.
     void fetchPrometheusConfig(schema, canGet, controller.signal)
       .then((info) => {
         if (cancelled) return;
         setPromConfig(info);
         if (info.mode === 'disabled') {
           setProm({ status: 'disabled' });
-        } else if (info.mode === 'basicAuth') {
-          if (info.username) setPromUsername((prev) => prev || info.username);
-          setProm({ status: 'authRequired' });
-        } else if (info.mode === 'open') {
+          return;
+        }
+        if (info.mode === 'open') {
           return fetchPrometheusSnapshot({ signal: controller.signal }).then((next) => {
             if (!cancelled) setProm(next);
           });
+        }
+        if (initialSaved) {
+          return fetchPrometheusSnapshot({ signal: controller.signal, credentials: initialSaved }).then((next) => {
+            if (cancelled) return;
+            if (next.status === 'authRequired') {
+              // Drop rejected stored credentials (e.g. rotated STALWART_METRICS_PASSWORD) cleanly.
+              clearSavedPrometheusCredentials();
+              setSavedCreds(null);
+              setPromPassword('');
+              setPromAuthFailed(true);
+            }
+            setProm(next);
+          });
+        }
+        if (info.mode === 'basicAuth') {
+          if (info.username) setPromUsername((prev) => prev || info.username);
+          setProm({ status: 'authRequired' });
         }
       })
       .catch(() => {
@@ -229,11 +258,26 @@ export function CommunityHealthPage() {
           ? { username: promUsername.trim(), password: promPassword }
           : undefined;
       const next = await fetchPrometheusSnapshot({ credentials: creds });
+      if (next.status === 'ok' && creds) {
+        savePrometheusCredentials(creds);
+        setSavedCreds(creds);
+      } else if (next.status === 'authRequired' && savedCreds) {
+        clearSavedPrometheusCredentials();
+        setSavedCreds(null);
+      }
       setProm(next);
       setPromAuthFailed(next.status === 'authRequired');
     } finally {
       setPromManualLoading(false);
     }
+  };
+
+  const handleForgetPrometheusCreds = () => {
+    clearSavedPrometheusCredentials();
+    setSavedCreds(null);
+    setPromPassword('');
+    setPromAuthFailed(false);
+    setProm({ status: 'authRequired' });
   };
 
   const filteredMetrics = useMemo(() => {
@@ -554,6 +598,11 @@ export function CommunityHealthPage() {
                   >
                     {t('diagnostics.hideZero', 'Non-zero only')}
                   </button>
+                  {savedCreds && (
+                    <Button type="button" variant="outline" size="sm" onClick={handleForgetPrometheusCreds}>
+                      {t('diagnostics.forgetPromCreds', 'Forget password')}
+                    </Button>
+                  )}
                 </div>
 
                 {filteredMetrics.length === 0 ? (
